@@ -180,3 +180,34 @@ fn test_unsupported_language_graceful_fallback() {
     let tokens = engine.highlight_line_fallback("let x = 42;", 0);
     assert!(!tokens.is_empty());
 }
+
+#[test]
+fn test_regression_rust_multiple_lifetimes() {
+    let source = "fn foo<'a, 'b>(x: (i32, i32), y: &'a str)";
+    // Parameter parens: offset 14 '(' and 40 ')'
+    assert_eq!(find_matching_bracket(source, 14), Some(40));
+    assert_eq!(find_matching_bracket(source, 40), Some(14));
+
+    // Tuple parens around (i32, i32): offset 18 '(' and 27 ')'
+    assert_eq!(find_matching_bracket(source, 18), Some(27));
+    assert_eq!(find_matching_bracket(source, 27), Some(18));
+}
+
+#[test]
+fn test_regression_hash_comments_python_toml() {
+    let source = "x = (1 + 2) # def foo(): [bracket]\ny = [10];";
+    // Parens around 1 + 2: offset 4 '(' and 10 ')'
+    assert_eq!(find_matching_bracket(source, 4), Some(10));
+    assert_eq!(find_matching_bracket(source, 10), Some(4));
+
+    // Brackets inside '# ...' comment must be ignored
+    // First '[' in string is "[bracket]" inside the comment
+    let bracket_in_comment = source.find('[').unwrap();
+    assert_eq!(find_matching_bracket(source, bracket_in_comment), None);
+
+    // Brackets on second line: [10]
+    let bracket_open = source.rfind('[').unwrap();
+    let bracket_close = source.rfind(']').unwrap();
+    assert_eq!(find_matching_bracket(source, bracket_open), Some(bracket_close));
+    assert_eq!(find_matching_bracket(source, bracket_close), Some(bracket_open));
+}

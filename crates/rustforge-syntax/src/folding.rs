@@ -148,21 +148,19 @@ fn is_foldable_node(kind: &str) -> bool {
     ) || kind.contains("comment")
 }
 
+const MAX_SEARCH_WINDOW: usize = 10_000;
+
 /// Finds the matching bracket character offset in `source` for the bracket at `char_offset`.
 ///
 /// Ignores brackets that appear inside string literals or comments.
+/// Bounds the search to a local window around `char_offset` to avoid full-buffer allocations.
 pub fn find_matching_bracket(source: &str, char_offset: usize) -> Option<usize> {
-    let chars: Vec<char> = source.chars().collect();
-    if char_offset >= chars.len() {
+    if source.is_empty() {
         return None;
     }
 
-    let mask = compute_literal_and_comment_mask(&chars);
-    if mask[char_offset] {
-        return None;
-    }
-
-    let target_ch = chars[char_offset];
+    // Quick non-allocating check: is char_offset pointing to a bracket?
+    let target_ch = source.chars().nth(char_offset)?;
     let (match_ch, is_forward) = match target_ch {
         '(' => (')', true),
         '{' => ('}', true),
@@ -173,9 +171,46 @@ pub fn find_matching_bracket(source: &str, char_offset: usize) -> Option<usize> 
         _ => return None,
     };
 
+    // Determine window start and extract window characters without whole-buffer allocations
+    let (window_start_char, window_chars) = if is_forward {
+        let window_start = find_line_start_char_offset(source, char_offset);
+        let chars: Vec<char> = source
+            .chars()
+            .skip(window_start)
+            .take(char_offset - window_start + MAX_SEARCH_WINDOW)
+            .collect();
+        (window_start, chars)
+    } else {
+        let raw_start = char_offset.saturating_sub(MAX_SEARCH_WINDOW);
+        let window_start = if raw_start == 0 {
+            0
+        } else {
+            find_line_start_char_offset(source, raw_start)
+        };
+        let chars: Vec<char> = source
+            .chars()
+            .skip(window_start)
+            .take(char_offset - window_start + 1)
+            .collect();
+        (window_start, chars)
+    };
+
+    if char_offset < window_start_char {
+        return None;
+    }
+    let local_offset = char_offset - window_start_char;
+    if local_offset >= window_chars.len() {
+        return None;
+    }
+
+    let mask = compute_literal_and_comment_mask(&window_chars);
+    if mask[local_offset] {
+        return None;
+    }
+
     if is_forward {
         let mut depth = 1usize;
-        for (i, &ch) in chars.iter().enumerate().skip(char_offset + 1) {
+        for (i, &ch) in window_chars.iter().enumerate().skip(local_offset + 1) {
             if mask[i] {
                 continue;
             }
@@ -184,29 +219,39 @@ pub fn find_matching_bracket(source: &str, char_offset: usize) -> Option<usize> 
             } else if ch == match_ch {
                 depth -= 1;
                 if depth == 0 {
-                    return Some(i);
+                    return Some(window_start_char + i);
                 }
             }
         }
     } else {
         let mut depth = 1usize;
-        for i in (0..char_offset).rev() {
+        for i in (0..local_offset).rev() {
             if mask[i] {
                 continue;
             }
-            let ch = chars[i];
+            let ch = window_chars[i];
             if ch == target_ch {
                 depth += 1;
             } else if ch == match_ch {
                 depth -= 1;
                 if depth == 0 {
-                    return Some(i);
+                    return Some(window_start_char + i);
                 }
             }
         }
     }
 
     None
+}
+
+fn find_line_start_char_offset(source: &str, char_offset: usize) -> usize {
+    let mut last_newline_char_idx = None;
+    for (i, ch) in source.chars().take(char_offset).enumerate() {
+        if ch == '\n' {
+            last_newline_char_idx = Some(i + 1);
+        }
+    }
+    last_newline_char_idx.unwrap_or(0)
 }
 
 /// Returns a `BracketMatch` if `char_offset` points to a bracket with a valid counterpart.
@@ -229,7 +274,7 @@ fn compute_literal_and_comment_mask(chars: &[char]) -> Vec<bool> {
     while i < len {
         let ch = chars[i];
 
-        // 1. Line comment //
+        // 1. Line comment // (Rust, C, C++, JS, TS, Go)
         if ch == '/' && i + 1 < len && chars[i + 1] == '/' {
             while i < len && chars[i] != '\n' {
                 mask[i] = true;
@@ -238,7 +283,16 @@ fn compute_literal_and_comment_mask(chars: &[char]) -> Vec<bool> {
             continue;
         }
 
-        // 2. Block comment /* ... */
+        // 2. Line comment # (Python, TOML, Shell)
+        if ch == '#' {
+            while i < len && chars[i] != '\n' {
+                mask[i] = true;
+                i += 1;
+            }
+            continue;
+        }
+
+        // 3. Block comment /* ... */
         if ch == '/' && i + 1 < len && chars[i + 1] == '*' {
             mask[i] = true;
             mask[i + 1] = true;
@@ -255,7 +309,7 @@ fn compute_literal_and_comment_mask(chars: &[char]) -> Vec<bool> {
             continue;
         }
 
-        // 3. String literal: double quote "
+        // 4. String literal: double quote "
         if ch == '"' {
             mask[i] = true;
             i += 1;
@@ -276,19 +330,35 @@ fn compute_literal_and_comment_mask(chars: &[char]) -> Vec<bool> {
             continue;
         }
 
-        // 4. Character or single quote literal '
+        // 5. Character literal '...'
+        // Must be a valid character literal (e.g. 'c', '\n', '\u{1F600}'), not a Rust lifetime like `'a, 'b`.
         if ch == '\'' {
-            // Check if this single quote is closed on the same line (to distinguish from lifetimes like 'a)
+            let max_j = (i + 9).min(len);
             let mut closed = false;
             let mut j = i + 1;
-            let mut esc = false;
-            while j < len && chars[j] != '\n' {
-                if esc {
-                    esc = false;
-                } else if chars[j] == '\\' {
-                    esc = true;
-                } else if chars[j] == '\'' {
-                    closed = true;
+            let mut escaped = false;
+            let mut is_unicode_escape = false;
+
+            while j < max_j && chars[j] != '\n' {
+                let cur = chars[j];
+                if escaped {
+                    if cur == 'u' {
+                        is_unicode_escape = true;
+                    }
+                    escaped = false;
+                } else if cur == '\\' {
+                    escaped = true;
+                } else if cur == '\'' {
+                    if j - i >= 2 {
+                        closed = true;
+                    }
+                    break;
+                } else if is_unicode_escape && (cur == '{' || cur == '}') {
+                    // Allowed inside \u{...}
+                } else if cur.is_whitespace()
+                    || matches!(cur, ',' | '(' | ')' | '[' | ']' | '{' | '}' | ';')
+                {
+                    // Invalid in character literal; this is a lifetime or type parameter
                     break;
                 }
                 j += 1;
@@ -301,7 +371,7 @@ fn compute_literal_and_comment_mask(chars: &[char]) -> Vec<bool> {
             }
         }
 
-        // 5. Backtick string literal `
+        // 6. Backtick string literal `
         if ch == '`' {
             mask[i] = true;
             i += 1;
