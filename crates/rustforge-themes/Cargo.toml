@@ -1,0 +1,10 @@
+[package]
+name = "rustforge-themes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rustforge-syntax.workspace = true
+egui.workspace = true
+serde.workspace = true

@@ -1,0 +1,28 @@
+[package]
+name = "rustforge-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rustforge"
+path = "src/main.rs"
+
+[dependencies]
+rustforge-core.workspace = true
+rustforge-text-buffer.workspace = true
+rustforge-syntax.workspace = true
+rustforge-editor.workspace = true
+rustforge-terminal.workspace = true
+rustforge-workspace.workspace = true
+rustforge-themes.workspace = true
+rustforge-settings.workspace = true
+rustforge-search.workspace = true
+
+eframe.workspace = true
+egui.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rfd.workspace = true
+parking_lot.workspace = true
+serde.workspace = true

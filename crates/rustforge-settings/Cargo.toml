@@ -1,0 +1,10 @@
+[package]
+name = "rustforge-settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rustforge-themes.workspace = true
+serde.workspace = true
+toml.workspace = true

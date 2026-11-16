@@ -1,0 +1,45 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rustforge-core",
+    "crates/rustforge-text-buffer",
+    "crates/rustforge-syntax",
+    "crates/rustforge-editor",
+    "crates/rustforge-terminal",
+    "crates/rustforge-workspace",
+    "crates/rustforge-themes",
+    "crates/rustforge-settings",
+    "crates/rustforge-search",
+    "crates/rustforge-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+rustforge-core = { path = "crates/rustforge-core" }
+rustforge-text-buffer = { path = "crates/rustforge-text-buffer" }
+rustforge-syntax = { path = "crates/rustforge-syntax" }
+rustforge-editor = { path = "crates/rustforge-editor" }
+rustforge-terminal = { path = "crates/rustforge-terminal" }
+rustforge-workspace = { path = "crates/rustforge-workspace" }
+rustforge-themes = { path = "crates/rustforge-themes" }
+rustforge-settings = { path = "crates/rustforge-settings" }
+rustforge-search = { path = "crates/rustforge-search" }
+
+ropey = "1.6"
+portable-pty = "0.8"
+vte = "0.14"
+eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui = "0.29"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+parking_lot = "0.12"
+walkdir = "2.5"
+regex = "1.11"
+rfd = "0.15"
+thiserror = "2.0"
