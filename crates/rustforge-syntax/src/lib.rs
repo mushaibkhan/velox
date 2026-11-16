@@ -1,10 +1,16 @@
+pub mod folding;
 pub mod highlighter;
 pub mod language;
 pub mod token;
+pub mod tree_sitter_engine;
 
+pub use folding::{
+    compute_fold_ranges, find_bracket_match, find_matching_bracket, BracketMatch, FoldRange,
+};
 pub use highlighter::SyntaxHighlighter;
 pub use language::Language;
 pub use token::{TokenSpan, TokenType};
+pub use tree_sitter_engine::TreeSitterEngine;
 
 #[cfg(test)]
 mod tests {
