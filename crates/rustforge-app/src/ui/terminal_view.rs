@@ -1,4 +1,4 @@
-use crate::app::RustForgeApp;
+use crate::app::{FocusedPanel, RustForgeApp};
 use egui::{
     pos2, vec2, Align2, Color32, FontId, Key, Rect, RichText, ScrollArea, Sense,
     Ui,
@@ -35,7 +35,8 @@ pub fn render_terminal_panel(app: &mut RustForgeApp, ui: &mut Ui) {
                             }
                         }
                         if ui.small_button("+").on_hover_text("New Session").clicked() {
-                            app.new_terminal_session();
+                            let ctx = ui.ctx().clone();
+                            app.new_terminal_session(Some(ctx));
                         }
                     });
                 });
@@ -49,35 +50,39 @@ pub fn render_terminal_panel(app: &mut RustForgeApp, ui: &mut Ui) {
             let line_height = ui.fonts(|f| f.row_height(&font_id)) + 2.0;
             let char_width = ui.fonts(|f| f.glyph_width(&font_id, ' '));
 
-            let input = ui.input(|i| i.clone());
+            let is_focused = app.focused_panel == FocusedPanel::Terminal;
 
-            // Key routing into PTY
-            if input.modifiers.ctrl && input.key_pressed(Key::C) {
-                let _ = terminal.write_bytes(&[3]); // ETX
-            } else if input.modifiers.ctrl && input.key_pressed(Key::D) {
-                let _ = terminal.write_bytes(&[4]); // EOT
-            } else if input.modifiers.ctrl && input.key_pressed(Key::L) {
-                let _ = terminal.write_bytes(&[12]); // Form Feed
-            } else if input.key_pressed(Key::Enter) {
-                let _ = terminal.write_bytes(b"\r");
-            } else if input.key_pressed(Key::Backspace) {
-                let _ = terminal.write_bytes(&[8]);
-            } else if input.key_pressed(Key::Tab) {
-                let _ = terminal.write_bytes(b"\t");
-            } else if input.key_pressed(Key::ArrowUp) {
-                let _ = terminal.write_bytes(b"\x1b[A");
-            } else if input.key_pressed(Key::ArrowDown) {
-                let _ = terminal.write_bytes(b"\x1b[B");
-            } else if input.key_pressed(Key::ArrowRight) {
-                let _ = terminal.write_bytes(b"\x1b[C");
-            } else if input.key_pressed(Key::ArrowLeft) {
-                let _ = terminal.write_bytes(b"\x1b[D");
-            }
+            if is_focused {
+                let input = ui.input(|i| i.clone());
 
-            for event in &input.events {
-                if let egui::Event::Text(t) = event {
-                    if !input.modifiers.ctrl && !input.modifiers.command && !input.modifiers.alt {
-                        let _ = terminal.write_str(t);
+                // Key routing into PTY
+                if input.modifiers.ctrl && input.key_pressed(Key::C) {
+                    let _ = terminal.write_bytes(&[3]); // ETX
+                } else if input.modifiers.ctrl && input.key_pressed(Key::D) {
+                    let _ = terminal.write_bytes(&[4]); // EOT
+                } else if input.modifiers.ctrl && input.key_pressed(Key::L) {
+                    let _ = terminal.write_bytes(&[12]); // Form Feed
+                } else if input.key_pressed(Key::Enter) {
+                    let _ = terminal.write_bytes(b"\r");
+                } else if input.key_pressed(Key::Backspace) {
+                    let _ = terminal.write_bytes(&[8]);
+                } else if input.key_pressed(Key::Tab) {
+                    let _ = terminal.write_bytes(b"\t");
+                } else if input.key_pressed(Key::ArrowUp) {
+                    let _ = terminal.write_bytes(b"\x1b[A");
+                } else if input.key_pressed(Key::ArrowDown) {
+                    let _ = terminal.write_bytes(b"\x1b[B");
+                } else if input.key_pressed(Key::ArrowRight) {
+                    let _ = terminal.write_bytes(b"\x1b[C");
+                } else if input.key_pressed(Key::ArrowLeft) {
+                    let _ = terminal.write_bytes(b"\x1b[D");
+                }
+
+                for event in &input.events {
+                    if let egui::Event::Text(t) = event {
+                        if !input.modifiers.ctrl && !input.modifiers.command && !input.modifiers.alt {
+                            let _ = terminal.write_str(t);
+                        }
                     }
                 }
             }
@@ -86,21 +91,22 @@ pub fn render_terminal_panel(app: &mut RustForgeApp, ui: &mut Ui) {
             let desired_cols = ((available_size.x / char_width).floor() as u16).max(20);
             let desired_rows = ((available_size.y / line_height).floor() as u16).max(5);
 
-            // Resize PTY if window changed size
-            let current_cols = terminal.grid.read().cols as u16;
-            let current_rows = terminal.grid.read().rows as u16;
-            if desired_cols != current_cols || desired_rows != current_rows {
-                let _ = terminal.resize(desired_cols, desired_rows);
-            }
+            let _ = terminal.resize(desired_cols, desired_rows);
+
+            let mut clicked_terminal = false;
 
             ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     let grid = terminal.grid.read();
-                    let (rect, _response) = ui.allocate_exact_size(
-                        vec2(grid.cols as f32 * char_width, grid.rows as f32 * line_height),
+                    let (rect, response) = ui.allocate_exact_size(
+                        vec2(grid.cols as f32 * char_width, (grid.rows as f32 * line_height).max(available_size.y)),
                         Sense::click(),
                     );
+
+                    if response.clicked() {
+                        clicked_terminal = true;
+                    }
 
                     let painter = ui.painter_at(rect);
                     painter.rect_filled(rect, 0.0, app.theme.bg_terminal);
@@ -152,12 +158,17 @@ pub fn render_terminal_panel(app: &mut RustForgeApp, ui: &mut Ui) {
                         );
                     }
                 });
+
+            if clicked_terminal {
+                app.focused_panel = FocusedPanel::Terminal;
+            }
         } else {
             ui.vertical_centered(|ui| {
                 ui.add_space(30.0);
                 ui.label(RichText::new("Terminal not running").color(app.theme.fg_muted));
                 if ui.button("Start Terminal").clicked() {
-                    app.new_terminal_session();
+                    let ctx = ui.ctx().clone();
+                    app.new_terminal_session(Some(ctx));
                 }
             });
         }

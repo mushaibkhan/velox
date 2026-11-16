@@ -100,7 +100,8 @@ pub fn render_menu_bar(app: &mut RustForgeApp, ui: &mut Ui) {
 
         ui.menu_button("Terminal", |ui| {
             if ui.button("New Terminal").clicked() {
-                app.new_terminal_session();
+                let ctx = ui.ctx().clone();
+                app.new_terminal_session(Some(ctx));
                 app.terminal_visible = true;
                 ui.close_menu();
             }

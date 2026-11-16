@@ -16,6 +16,8 @@ pub struct TerminalSession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     is_alive: Arc<AtomicBool>,
+    last_cols: u16,
+    last_rows: u16,
 }
 
 impl TerminalSession {
@@ -23,6 +25,7 @@ impl TerminalSession {
         cols: u16,
         rows: u16,
         working_dir: Option<&Path>,
+        on_output: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let pty_system = native_pty_system();
         let pair: PtyPair = pty_system.openpty(PtySize {
@@ -56,6 +59,7 @@ impl TerminalSession {
         // Reader background thread
         let reader_grid = Arc::clone(&grid);
         let reader_alive = Arc::clone(&is_alive);
+        let repaint_cb = on_output;
 
         thread::Builder::new()
             .name("terminal-pty-reader".into())
@@ -70,11 +74,16 @@ impl TerminalSession {
                             break;
                         }
                         Ok(n) => {
-                            let mut grid_guard = reader_grid.write();
-                            let mut performer = GridPerformer {
-                                grid: &mut grid_guard,
-                            };
-                            parser.advance(&mut performer, &buf[..n]);
+                            {
+                                let mut grid_guard = reader_grid.write();
+                                let mut performer = GridPerformer {
+                                    grid: &mut grid_guard,
+                                };
+                                parser.advance(&mut performer, &buf[..n]);
+                            }
+                            if let Some(cb) = &repaint_cb {
+                                cb();
+                            }
                         }
                         Err(e) => {
                             tracing::debug!("Terminal PTY read error: {}", e);
@@ -92,6 +101,8 @@ impl TerminalSession {
             master: pair.master,
             writer,
             is_alive,
+            last_cols: cols,
+            last_rows: rows,
         })
     }
 
@@ -106,6 +117,14 @@ impl TerminalSession {
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let cols = cols.max(20);
+        let rows = rows.max(5);
+        if self.last_cols == cols && self.last_rows == rows {
+            return Ok(());
+        }
+        self.last_cols = cols;
+        self.last_rows = rows;
+
         self.master.resize(PtySize {
             rows,
             cols,

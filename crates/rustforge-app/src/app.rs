@@ -23,6 +23,14 @@ pub enum SidebarTab {
     Settings,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusedPanel {
+    Editor,
+    Terminal,
+    #[allow(dead_code)]
+    Sidebar,
+}
+
 pub struct RustForgeApp {
     pub theme: Theme,
     pub settings: Settings,
@@ -33,6 +41,7 @@ pub struct RustForgeApp {
     pub active_sidebar: SidebarTab,
     pub sidebar_visible: bool,
     pub terminal_visible: bool,
+    pub focused_panel: FocusedPanel,
     pub sidebar_width: f32,
     pub terminal_height: f32,
 
@@ -49,7 +58,7 @@ pub struct RustForgeApp {
 }
 
 impl RustForgeApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let settings = Settings::load();
         let theme = match settings.theme_mode {
             ThemeMode::DarkModern => Theme::dark_modern(),
@@ -77,6 +86,7 @@ impl RustForgeApp {
             active_sidebar: SidebarTab::Explorer,
             sidebar_visible: true,
             terminal_visible: true,
+            focused_panel: FocusedPanel::Editor,
             sidebar_width: 250.0,
             terminal_height: 220.0,
             search_query: String::new(),
@@ -88,8 +98,8 @@ impl RustForgeApp {
             commands,
         };
 
-        // Try to start default terminal session
-        app.new_terminal_session();
+        // Try to start default terminal session with egui repaint callback
+        app.new_terminal_session(Some(cc.egui_ctx.clone()));
 
         // Create an initial welcome/untitled file
         app.new_file();
@@ -298,9 +308,15 @@ impl RustForgeApp {
         }
     }
 
-    pub fn new_terminal_session(&mut self) {
+    pub fn new_terminal_session(&mut self, ctx: Option<egui::Context>) {
         let cwd = self.workspace.root_path.as_deref();
-        match TerminalSession::spawn(80, 24, cwd) {
+        let repaint_cb = ctx.map(|c| {
+            let cb: std::sync::Arc<dyn Fn() + Send + Sync> = std::sync::Arc::new(move || {
+                c.request_repaint();
+            });
+            cb
+        });
+        match TerminalSession::spawn(80, 24, cwd, repaint_cb) {
             Ok(session) => self.terminal = Some(session),
             Err(e) => tracing::warn!("Failed to spawn terminal session: {}", e),
         }
@@ -515,10 +531,5 @@ impl eframe::App for RustForgeApp {
 
         // 7. Modals: Command Palette & Quick Open overlay
         render_command_palette(self, ctx);
-
-        // Keep repainting if terminal is active to receive streaming output smoothly
-        if self.terminal_visible {
-            ctx.request_repaint_after(std::time::Duration::from_millis(50));
-        }
     }
 }

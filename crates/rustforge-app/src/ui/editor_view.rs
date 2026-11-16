@@ -70,6 +70,7 @@ fn render_tab_bar(app: &mut RustForgeApp, ui: &mut Ui) {
 
         if let Some(idx) = tab_to_switch {
             app.active_tab_idx = Some(idx);
+            app.focused_panel = crate::app::FocusedPanel::Editor;
         }
 
         if let Some(idx) = tab_to_close {
@@ -91,38 +92,41 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
 
     let editor = &mut app.tabs[active_idx].editor;
 
-    // Handle keyboard input for active editor
-    let input = ui.input(|i| i.clone());
+    // Handle keyboard input for active editor if focused
+    let is_focused = app.focused_panel == crate::app::FocusedPanel::Editor;
+    if is_focused {
+        let input = ui.input(|i| i.clone());
 
-    // Navigation and editing keystrokes
-    if input.key_pressed(Key::ArrowLeft) {
-        editor.move_cursor(Direction::Left, input.modifiers.shift);
-    } else if input.key_pressed(Key::ArrowRight) {
-        editor.move_cursor(Direction::Right, input.modifiers.shift);
-    } else if input.key_pressed(Key::ArrowUp) {
-        editor.move_cursor(Direction::Up, input.modifiers.shift);
-    } else if input.key_pressed(Key::ArrowDown) {
-        editor.move_cursor(Direction::Down, input.modifiers.shift);
-    } else if input.key_pressed(Key::Home) {
-        editor.move_to_line_start(input.modifiers.shift);
-    } else if input.key_pressed(Key::End) {
-        editor.move_to_line_end(input.modifiers.shift);
-    } else if input.key_pressed(Key::Backspace) {
-        editor.backspace();
-    } else if input.key_pressed(Key::Delete) {
-        editor.delete_forward();
-    } else if input.key_pressed(Key::Enter) {
-        editor.insert_newline();
-    } else if input.key_pressed(Key::Tab) {
-        let spaces = " ".repeat(editor.tab_size);
-        editor.insert_text(&spaces);
-    }
+        // Navigation and editing keystrokes
+        if input.key_pressed(Key::ArrowLeft) {
+            editor.move_cursor(Direction::Left, input.modifiers.shift);
+        } else if input.key_pressed(Key::ArrowRight) {
+            editor.move_cursor(Direction::Right, input.modifiers.shift);
+        } else if input.key_pressed(Key::ArrowUp) {
+            editor.move_cursor(Direction::Up, input.modifiers.shift);
+        } else if input.key_pressed(Key::ArrowDown) {
+            editor.move_cursor(Direction::Down, input.modifiers.shift);
+        } else if input.key_pressed(Key::Home) {
+            editor.move_to_line_start(input.modifiers.shift);
+        } else if input.key_pressed(Key::End) {
+            editor.move_to_line_end(input.modifiers.shift);
+        } else if input.key_pressed(Key::Backspace) {
+            editor.backspace();
+        } else if input.key_pressed(Key::Delete) {
+            editor.delete_forward();
+        } else if input.key_pressed(Key::Enter) {
+            editor.insert_newline();
+        } else if input.key_pressed(Key::Tab) {
+            let spaces = " ".repeat(editor.tab_size);
+            editor.insert_text(&spaces);
+        }
 
-    // Text typing event handling
-    for event in &input.events {
-        if let egui::Event::Text(t) = event {
-            if !input.modifiers.ctrl && !input.modifiers.command && !input.modifiers.alt {
-                editor.insert_text(t);
+        // Text typing event handling
+        for event in &input.events {
+            if let egui::Event::Text(t) = event {
+                if !input.modifiers.ctrl && !input.modifiers.command && !input.modifiers.alt {
+                    editor.insert_text(t);
+                }
             }
         }
     }
@@ -265,6 +269,7 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
 
             // Click inside editor to position cursor
             if response.clicked() {
+                app.focused_panel = crate::app::FocusedPanel::Editor;
                 if let Some(mouse_pos) = response.interact_pointer_pos() {
                     let clicked_line = ((mouse_pos.y - rect.min.y) / line_height).floor().max(0.0) as usize;
                     let clicked_line = clicked_line.min(total_lines.saturating_sub(1));
