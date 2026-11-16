@@ -4,6 +4,8 @@ Cargo.lock
 *.swp
 *.log
 .DS_Store
+.worktrees
 .worktrees/
+.superpowers
 .superpowers/
 
