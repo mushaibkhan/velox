@@ -3,7 +3,7 @@ use egui::{
     pos2, vec2, Align2, FontId, Key, Rect, RichText, ScrollArea, Sense, Stroke,
     TextEdit, Ui,
 };
-use rustforge_editor::Direction;
+use rustforge_editor::{click_to_scroll_line, thumb_y_to_scroll_line, Direction};
 
 pub fn render_editor_area(app: &mut RustForgeApp, ui: &mut Ui) {
     ui.vertical(|ui| {
@@ -90,35 +90,49 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
         render_find_bar(app, active_idx, ui);
     }
 
+    let theme = &app.theme;
+    let show_line_numbers = app.settings.show_line_numbers;
+    let show_minimap_setting = app.settings.show_minimap;
     let editor = &mut app.tabs[active_idx].editor;
 
     // Handle keyboard input for active editor if focused
     let is_focused = app.focused_panel == crate::app::FocusedPanel::Editor;
+    let mut nav_key_pressed = false;
     if is_focused {
         let input = ui.input(|i| i.clone());
 
         // Navigation and editing keystrokes
         if input.key_pressed(Key::ArrowLeft) {
             editor.move_cursor(Direction::Left, input.modifiers.shift);
+            nav_key_pressed = true;
         } else if input.key_pressed(Key::ArrowRight) {
             editor.move_cursor(Direction::Right, input.modifiers.shift);
+            nav_key_pressed = true;
         } else if input.key_pressed(Key::ArrowUp) {
             editor.move_cursor(Direction::Up, input.modifiers.shift);
+            nav_key_pressed = true;
         } else if input.key_pressed(Key::ArrowDown) {
             editor.move_cursor(Direction::Down, input.modifiers.shift);
+            nav_key_pressed = true;
         } else if input.key_pressed(Key::Home) {
             editor.move_to_line_start(input.modifiers.shift);
+            nav_key_pressed = true;
         } else if input.key_pressed(Key::End) {
             editor.move_to_line_end(input.modifiers.shift);
+            nav_key_pressed = true;
         } else if input.key_pressed(Key::Backspace) {
             editor.backspace();
+            nav_key_pressed = true;
         } else if input.key_pressed(Key::Delete) {
             editor.delete_forward();
+            nav_key_pressed = true;
         } else if input.key_pressed(Key::Enter) {
             editor.insert_newline();
+            nav_key_pressed = true;
         } else if input.key_pressed(Key::Tab) {
             let spaces = " ".repeat(editor.tab_size);
             editor.insert_text(&spaces);
+            nav_key_pressed = true;
         }
 
         // Text typing event handling
@@ -126,15 +140,16 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
             if let egui::Event::Text(t) = event {
                 if !input.modifiers.ctrl && !input.modifiers.command && !input.modifiers.alt {
                     editor.insert_text(t);
+                    nav_key_pressed = true;
                 }
             }
         }
     }
 
-    // Viewport rendering
+    // Viewport rendering metrics
     let total_lines = editor.buffer.line_count();
     let gutter_digits = total_lines.to_string().len().max(3);
-    let gutter_width = if app.settings.show_line_numbers {
+    let gutter_width = if show_line_numbers {
         (gutter_digits as f32 + 2.0) * char_width + 12.0
     } else {
         8.0
@@ -146,141 +161,337 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
 
     let primary_pos = editor.primary_position();
 
-    ScrollArea::vertical()
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            let (rect, response) = ui.allocate_exact_size(
-                vec2(ui.available_width(), (total_lines as f32 * line_height).max(available_height)),
-                Sense::click_and_drag(),
-            );
+    let show_minimap = editor.minimap.enabled && show_minimap_setting;
+    let minimap_width = if show_minimap { editor.minimap.width } else { 0.0 };
+    let editor_width = (ui.available_width() - minimap_width).max(80.0);
+    let is_minimap_dragging = editor.minimap.is_dragging;
 
-            let painter = ui.painter_at(rect);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
 
-            // Background
-            painter.rect_filled(rect, 0.0, app.theme.bg_editor);
+        // 1. Main Editor Canvas
+        ui.allocate_ui_with_layout(
+            vec2(editor_width, available_height),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                let mut scroll_area = ScrollArea::vertical()
+                    .auto_shrink([false, false]);
 
-            // Gutter background
-            let gutter_rect = Rect::from_min_size(rect.min, vec2(gutter_width, rect.height()));
-            painter.rect_filled(gutter_rect, 0.0, app.theme.bg_gutter);
-            painter.line_segment(
-                [gutter_rect.right_top(), gutter_rect.right_bottom()],
-                Stroke::new(1.0_f32, app.theme.border),
-            );
-
-            // Active line highlight
-            let active_line_y = rect.min.y + (primary_pos.line as f32 * line_height);
-            let active_line_rect = Rect::from_min_size(
-                pos2(rect.min.x + gutter_width, active_line_y),
-                vec2(rect.width() - gutter_width, line_height),
-            );
-            painter.rect_filled(active_line_rect, 0.0, app.theme.line_highlight);
-
-            // Viewport lines only
-            let start_line = ((ui.clip_rect().min.y - rect.min.y) / line_height).floor().max(0.0) as usize;
-            let end_line = ((ui.clip_rect().max.y - rect.min.y) / line_height).ceil() as usize;
-            let end_line = end_line.min(total_lines);
-
-            let _primary_cursor = editor.primary_cursor();
-
-            for line_idx in start_line..end_line {
-                let line_y = rect.min.y + (line_idx as f32 * line_height);
-
-                // 1. Line numbers
-                if app.settings.show_line_numbers {
-                    let num_str = format!("{:>width$}", line_idx + 1, width = gutter_digits);
-                    let num_color = if line_idx == primary_pos.line {
-                        app.theme.fg_primary
-                    } else {
-                        app.theme.fg_muted
-                    };
-                    painter.text(
-                        pos2(rect.min.x + 8.0, line_y + 1.0),
-                        Align2::LEFT_TOP,
-                        num_str,
-                        font_id.clone(),
-                        num_color,
-                    );
+                if is_minimap_dragging || nav_key_pressed {
+                    scroll_area = scroll_area.vertical_scroll_offset(editor.scroll_line as f32 * line_height);
                 }
 
-                // 2. Syntax-highlighted text tokens
-                let tokens = editor.highlight_line(line_idx);
-                let line_start_char = editor.buffer.line_to_char(line_idx);
+                scroll_area.show(ui, |ui| {
+                    let (rect, response) = ui.allocate_exact_size(
+                        vec2(ui.available_width(), (total_lines as f32 * line_height).max(available_height)),
+                        Sense::click_and_drag(),
+                    );
 
-                if let Some(line_str) = editor.buffer.line_to_string(line_idx) {
-                    let clean_line = line_str.trim_end_matches(['\r', '\n']);
+                    let painter = ui.painter_at(rect);
 
-                    for token in tokens {
-                        let token_start_in_line = token.start.saturating_sub(line_start_char);
-                        let token_end_in_line = token.end.saturating_sub(line_start_char).min(clean_line.chars().count());
+                    // Background
+                    painter.rect_filled(rect, 0.0, theme.bg_editor);
 
-                        if token_start_in_line < token_end_in_line {
-                            let text_segment: String = clean_line
-                                .chars()
-                                .skip(token_start_in_line)
-                                .take(token_end_in_line - token_start_in_line)
-                                .collect();
+                    // Gutter background
+                    let gutter_rect = Rect::from_min_size(rect.min, vec2(gutter_width, rect.height()));
+                    painter.rect_filled(gutter_rect, 0.0, theme.bg_gutter);
+                    painter.line_segment(
+                        [gutter_rect.right_top(), gutter_rect.right_bottom()],
+                        Stroke::new(1.0_f32, theme.border),
+                    );
 
-                            let token_x = rect.min.x + gutter_width + 8.0 + (token_start_in_line as f32 * char_width);
-                            let color = app.theme.get_token_color(token.token_type);
+                    // Active line highlight
+                    let active_line_y = rect.min.y + (primary_pos.line as f32 * line_height);
+                    let active_line_rect = Rect::from_min_size(
+                        pos2(rect.min.x + gutter_width, active_line_y),
+                        vec2(rect.width() - gutter_width, line_height),
+                    );
+                    painter.rect_filled(active_line_rect, 0.0, theme.line_highlight);
 
+                    // Viewport lines only
+                    let start_line = ((ui.clip_rect().min.y - rect.min.y) / line_height).floor().max(0.0) as usize;
+                    let end_line = ((ui.clip_rect().max.y - rect.min.y) / line_height).ceil() as usize;
+                    let end_line = end_line.min(total_lines);
+
+                    if !is_minimap_dragging {
+                        editor.scroll_line = start_line;
+                    }
+
+                    for line_idx in start_line..end_line {
+                        let line_y = rect.min.y + (line_idx as f32 * line_height);
+
+                        // 1. Line numbers
+                        if show_line_numbers {
+                            let num_str = format!("{:>width$}", line_idx + 1, width = gutter_digits);
+                            let num_color = if line_idx == primary_pos.line {
+                                theme.fg_primary
+                            } else {
+                                theme.fg_muted
+                            };
                             painter.text(
-                                pos2(token_x, line_y + 1.0),
+                                pos2(rect.min.x + 8.0, line_y + 1.0),
                                 Align2::LEFT_TOP,
-                                text_segment,
+                                num_str,
                                 font_id.clone(),
-                                color,
+                                num_color,
+                            );
+                        }
+
+                        // 2. Syntax-highlighted text tokens
+                        let tokens = editor.highlight_line(line_idx);
+                        let line_start_char = editor.buffer.line_to_char(line_idx);
+
+                        if let Some(line_str) = editor.buffer.line_to_string(line_idx) {
+                            let clean_line = line_str.trim_end_matches(['\r', '\n']);
+
+                            for token in tokens {
+                                let token_start_in_line = token.start.saturating_sub(line_start_char);
+                                let token_end_in_line = token.end.saturating_sub(line_start_char).min(clean_line.chars().count());
+
+                                if token_start_in_line < token_end_in_line {
+                                    let text_segment: String = clean_line
+                                        .chars()
+                                        .skip(token_start_in_line)
+                                        .take(token_end_in_line - token_start_in_line)
+                                        .collect();
+
+                                    let token_x = rect.min.x + gutter_width + 8.0 + (token_start_in_line as f32 * char_width);
+                                    let color = theme.get_token_color(token.token_type);
+
+                                    painter.text(
+                                        pos2(token_x, line_y + 1.0),
+                                        Align2::LEFT_TOP,
+                                        text_segment,
+                                        font_id.clone(),
+                                        color,
+                                    );
+                                }
+                            }
+
+                            // 3. Selection highlight for this line
+                            for cursor in &editor.cursors {
+                                if !cursor.is_empty() {
+                                    let sel_start = cursor.start();
+                                    let sel_end = cursor.end();
+                                    let line_end_char = line_start_char + clean_line.chars().count();
+
+                                    if sel_end > line_start_char && sel_start < line_end_char {
+                                        let line_sel_start = sel_start.max(line_start_char).saturating_sub(line_start_char);
+                                        let line_sel_end = sel_end.min(line_end_char).saturating_sub(line_start_char);
+
+                                        let sel_x = rect.min.x + gutter_width + 8.0 + (line_sel_start as f32 * char_width);
+                                        let sel_w = (line_sel_end - line_sel_start) as f32 * char_width;
+
+                                        let sel_rect = Rect::from_min_size(
+                                            pos2(sel_x, line_y),
+                                            vec2(sel_w, line_height),
+                                        );
+                                        painter.rect_filled(sel_rect, 0.0, theme.selection);
+                                    }
+                                }
+                            }
+                        }
+
+                        // 4. Cursor rendering
+                        if line_idx == primary_pos.line {
+                            let cursor_x = rect.min.x + gutter_width + 8.0 + (primary_pos.column as f32 * char_width);
+                            painter.line_segment(
+                                [pos2(cursor_x, line_y), pos2(cursor_x, line_y + line_height - 1.0)],
+                                Stroke::new(2.0_f32, theme.fg_primary),
                             );
                         }
                     }
 
-                    // 3. Selection highlight for this line
-                    for cursor in &editor.cursors {
-                        if !cursor.is_empty() {
-                            let sel_start = cursor.start();
-                            let sel_end = cursor.end();
-                            let line_end_char = line_start_char + clean_line.chars().count();
+                    // Click inside editor to position cursor
+                    if response.clicked() {
+                        if let Some(mouse_pos) = response.interact_pointer_pos() {
+                            let clicked_line = ((mouse_pos.y - rect.min.y) / line_height).floor().max(0.0) as usize;
+                            let clicked_line = clicked_line.min(total_lines.saturating_sub(1));
+                            let clicked_col = ((mouse_pos.x - (rect.min.x + gutter_width + 8.0)) / char_width).round().max(0.0) as usize;
 
-                            if sel_end > line_start_char && sel_start < line_end_char {
-                                let line_sel_start = sel_start.max(line_start_char).saturating_sub(line_start_char);
-                                let line_sel_end = sel_end.min(line_end_char).saturating_sub(line_start_char);
-
-                                let sel_x = rect.min.x + gutter_width + 8.0 + (line_sel_start as f32 * char_width);
-                                let sel_w = (line_sel_end - line_sel_start) as f32 * char_width;
-
-                                let sel_rect = Rect::from_min_size(
-                                    pos2(sel_x, line_y),
-                                    vec2(sel_w, line_height),
-                                );
-                                painter.rect_filled(sel_rect, 0.0, app.theme.selection);
-                            }
+                            let char_offset = editor.buffer.position_to_char(rustforge_core::Position::new(clicked_line, clicked_col));
+                            editor.cursors = vec![rustforge_core::Selection::point(char_offset)];
+                            editor.primary_cursor_idx = 0;
                         }
                     }
-                }
+                });
+            },
+        );
 
-                // 4. Cursor rendering
-                if line_idx == primary_pos.line {
-                    let cursor_x = rect.min.x + gutter_width + 8.0 + (primary_pos.column as f32 * char_width);
-                    painter.line_segment(
-                        [pos2(cursor_x, line_y), pos2(cursor_x, line_y + line_height - 1.0)],
-                        Stroke::new(2.0_f32, app.theme.fg_primary),
+        // 2. Minimap Gutter (100px wide sleek bar on the right side)
+        if show_minimap {
+            render_minimap(editor, theme, ui, available_height, line_height);
+        }
+    });
+}
+
+fn render_minimap(
+    editor: &mut rustforge_editor::EditorState,
+    theme: &rustforge_themes::Theme,
+    ui: &mut Ui,
+    height: f32,
+    _line_height: f32,
+) {
+    let minimap_width = editor.minimap.width.max(60.0);
+    let total_lines = editor.buffer.line_count();
+    let primary_pos = editor.primary_position();
+
+    let (minimap_rect, response) = ui.allocate_exact_size(
+        vec2(minimap_width, height),
+        Sense::click_and_drag(),
+    );
+
+    let painter = ui.painter_at(minimap_rect);
+
+    // 1. Background and left border separator
+    painter.rect_filled(minimap_rect, 0.0, theme.bg_gutter);
+    painter.line_segment(
+        [minimap_rect.left_top(), minimap_rect.left_bottom()],
+        Stroke::new(1.0_f32, theme.border),
+    );
+
+    // 2. Code density bars
+    if total_lines > 0 {
+        let lines = editor.minimap_lines();
+        let scale_y = height / total_lines as f32;
+        let minimap_line_h = if total_lines as f32 * 3.0 <= height {
+            2.0_f32
+        } else {
+            (scale_y * 0.8).clamp(1.0, 3.0)
+        };
+        let line_step = if total_lines as f32 * 3.0 <= height {
+            3.0_f32
+        } else {
+            scale_y
+        };
+
+        let content_width = (minimap_width - 12.0).max(10.0);
+        let mut last_drawn_y = -10.0_f32;
+
+        for line in &lines {
+            if line.length > 0 && !line.is_empty() {
+                let y = minimap_rect.min.y + (line.line as f32 * line_step);
+                if y >= minimap_rect.min.y && y + minimap_line_h <= minimap_rect.max.y + 2.0 {
+                    // Skip redundant sub-pixel lines on huge files unless it's the active line
+                    if y - last_drawn_y < 1.0 && line.line != primary_pos.line {
+                        continue;
+                    }
+                    last_drawn_y = y;
+
+                    let bar_x = minimap_rect.min.x + 6.0 + (line.indent_ratio * content_width);
+                    let bar_w = (line.content_width_ratio() * content_width).max(2.0);
+                    let bar_w = bar_w.min((minimap_rect.max.x - bar_x - 4.0).max(2.0));
+
+                    let bar_color = if line.line == primary_pos.line {
+                        egui::Color32::from_rgba_unmultiplied(
+                            theme.fg_primary.r(),
+                            theme.fg_primary.g(),
+                            theme.fg_primary.b(),
+                            160,
+                        )
+                    } else {
+                        egui::Color32::from_rgba_unmultiplied(
+                            theme.fg_secondary.r(),
+                            theme.fg_secondary.g(),
+                            theme.fg_secondary.b(),
+                            80,
+                        )
+                    };
+
+                    painter.rect_filled(
+                        Rect::from_min_size(pos2(bar_x, y), vec2(bar_w, minimap_line_h)),
+                        0.5,
+                        bar_color,
                     );
                 }
             }
+        }
+    }
 
-            // Click inside editor to position cursor
-            if response.clicked() {
-                app.focused_panel = crate::app::FocusedPanel::Editor;
-                if let Some(mouse_pos) = response.interact_pointer_pos() {
-                    let clicked_line = ((mouse_pos.y - rect.min.y) / line_height).floor().max(0.0) as usize;
-                    let clicked_line = clicked_line.min(total_lines.saturating_sub(1));
-                    let clicked_col = ((mouse_pos.x - (rect.min.x + gutter_width + 8.0)) / char_width).round().max(0.0) as usize;
+    // 3. Draggable semi-transparent viewport thumb
+    let thumb = editor.minimap.compute_thumb(
+        editor.scroll_line,
+        editor.visible_lines,
+        total_lines,
+        height,
+    );
+    let thumb_rect = Rect::from_min_size(
+        pos2(minimap_rect.min.x, minimap_rect.min.y + thumb.y),
+        vec2(minimap_width, thumb.height),
+    );
 
-                    let char_offset = editor.buffer.position_to_char(rustforge_core::Position::new(clicked_line, clicked_col));
-                    editor.cursors = vec![rustforge_core::Selection::point(char_offset)];
-                    editor.primary_cursor_idx = 0;
-                }
+    let is_hovered = response.hover_pos().is_some_and(|p| thumb_rect.contains(p));
+    let is_dragging = editor.minimap.is_dragging;
+
+    let (thumb_fill, thumb_stroke) = if is_dragging {
+        (
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 45),
+            Stroke::new(1.0_f32, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 80)),
+        )
+    } else if is_hovered {
+        (
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30),
+            Stroke::new(1.0_f32, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 60)),
+        )
+    } else {
+        (
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 18),
+            Stroke::new(1.0_f32, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40)),
+        )
+    };
+
+    painter.rect(thumb_rect, 2.0, thumb_fill, thumb_stroke);
+
+    // 4. Interactivity: Click and Drag to update scroll_line
+    if response.drag_started() {
+        editor.minimap.is_dragging = true;
+        if let Some(pos) = response.interact_pointer_pos() {
+            let rel_y = pos.y - minimap_rect.min.y;
+            if !thumb_rect.contains(pos) {
+                editor.scroll_line = click_to_scroll_line(
+                    rel_y,
+                    total_lines,
+                    editor.visible_lines,
+                    height,
+                );
             }
-        });
+        }
+        ui.ctx().request_repaint();
+    }
+
+    if response.dragged() {
+        editor.minimap.is_dragging = true;
+        if let Some(pos) = response.interact_pointer_pos() {
+            let rel_y = pos.y - minimap_rect.min.y;
+            let target_thumb_y = rel_y - (thumb.height / 2.0);
+            editor.scroll_line = thumb_y_to_scroll_line(
+                target_thumb_y,
+                thumb.height,
+                total_lines,
+                editor.visible_lines,
+                height,
+            );
+        }
+        ui.ctx().request_repaint();
+    }
+
+    if response.drag_stopped() {
+        editor.minimap.is_dragging = false;
+        ui.ctx().request_repaint();
+    }
+
+    if response.clicked() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let rel_y = pos.y - minimap_rect.min.y;
+            editor.scroll_line = click_to_scroll_line(
+                rel_y,
+                total_lines,
+                editor.visible_lines,
+                height,
+            );
+            ui.ctx().request_repaint();
+        }
+    }
 }
 
 fn render_find_bar(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) {

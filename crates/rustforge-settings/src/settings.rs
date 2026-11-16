@@ -21,7 +21,7 @@ impl Default for Settings {
             tab_size: 4,
             show_line_numbers: true,
             word_wrap: false,
-            show_minimap: false,
+            show_minimap: true,
             theme_mode: ThemeMode::DarkModern,
             auto_save: false,
         }

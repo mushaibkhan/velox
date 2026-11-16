@@ -1,5 +1,6 @@
 use crate::cursor::{normalize_selections, Direction};
 use crate::find::FindState;
+use crate::minimap::{MinimapLine, MinimapState, MinimapThumb};
 use rustforge_core::{Position, Selection};
 use rustforge_syntax::{Language, SyntaxHighlighter, TokenSpan};
 use rustforge_text_buffer::TextBuffer;
@@ -15,6 +16,7 @@ pub struct EditorState {
     pub scroll_line: usize,
     pub visible_lines: usize,
     pub tab_size: usize,
+    pub minimap: MinimapState,
 }
 
 impl EditorState {
@@ -24,6 +26,9 @@ impl EditorState {
         } else {
             Language::PlainText
         };
+
+        let mut minimap = MinimapState::new();
+        minimap.update_from_buffer(&buffer);
 
         Self {
             buffer,
@@ -36,6 +41,7 @@ impl EditorState {
             scroll_line: 0,
             visible_lines: 40,
             tab_size: 4,
+            minimap,
         }
     }
 
@@ -91,6 +97,7 @@ impl EditorState {
         normalize_selections(&mut new_cursors);
         self.cursors = new_cursors;
         self.primary_cursor_idx = 0;
+        self.update_minimap();
     }
 
     pub fn insert_newline(&mut self) {
@@ -121,6 +128,7 @@ impl EditorState {
         normalize_selections(&mut new_cursors);
         self.cursors = new_cursors;
         self.primary_cursor_idx = 0;
+        self.update_minimap();
     }
 
     pub fn delete_forward(&mut self) {
@@ -146,6 +154,7 @@ impl EditorState {
         normalize_selections(&mut new_cursors);
         self.cursors = new_cursors;
         self.primary_cursor_idx = 0;
+        self.update_minimap();
     }
 
     pub fn move_cursor(&mut self, direction: Direction, select: bool) {
@@ -232,6 +241,7 @@ impl EditorState {
         if let Some(cursors) = self.buffer.undo() {
             self.cursors = cursors;
             self.primary_cursor_idx = 0;
+            self.update_minimap();
         }
     }
 
@@ -239,6 +249,7 @@ impl EditorState {
         if let Some(cursors) = self.buffer.redo() {
             self.cursors = cursors;
             self.primary_cursor_idx = 0;
+            self.update_minimap();
         }
     }
 
@@ -249,5 +260,34 @@ impl EditorState {
         } else if pos.line >= self.scroll_line + self.visible_lines {
             self.scroll_line = pos.line.saturating_sub(self.visible_lines).saturating_add(1);
         }
+    }
+
+    // Minimap helpers
+    pub fn update_minimap(&mut self) {
+        self.minimap.update_from_buffer(&self.buffer);
+    }
+
+    pub fn minimap_lines(&self) -> Vec<MinimapLine> {
+        self.minimap.compute_minimap_lines(self.buffer.line_count())
+    }
+
+    pub fn minimap_thumb(&self, height: f32) -> MinimapThumb {
+        self.minimap.compute_thumb(
+            self.scroll_line,
+            self.visible_lines,
+            self.buffer.line_count(),
+            height,
+        )
+    }
+
+    pub fn minimap_y_to_line(&self, minimap_y: f32, height: f32) -> usize {
+        self.minimap
+            .minimap_y_to_editor_line(minimap_y, self.buffer.line_count(), height)
+    }
+
+    pub fn scroll_to_minimap_y(&mut self, minimap_y: f32, height: f32) {
+        let target_line = self.minimap_y_to_line(minimap_y, height);
+        let max_scroll = self.buffer.line_count().saturating_sub(self.visible_lines);
+        self.scroll_line = target_line.saturating_sub(self.visible_lines / 2).min(max_scroll);
     }
 }
