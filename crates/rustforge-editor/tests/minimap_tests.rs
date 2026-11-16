@@ -1,7 +1,7 @@
 use rustforge_editor::minimap::{
     click_to_scroll_line, compute_thumb_rect, editor_line_to_minimap_y,
-    minimap_line_to_editor_line, minimap_y_to_editor_line, thumb_y_to_scroll_line,
-    MinimapLine, MinimapState, MinimapThumb,
+    effective_track_height, minimap_line_to_editor_line, minimap_y_to_editor_line,
+    thumb_y_to_scroll_line, MinimapLine, MinimapState, MinimapThumb,
 };
 use rustforge_editor::EditorState;
 use rustforge_text_buffer::TextBuffer;
@@ -252,4 +252,77 @@ fn test_editor_state_minimap_integration() {
     // Test text mutation triggers minimap update
     editor.insert_text("// comment\n");
     assert_eq!(editor.minimap.cached_line_count(), editor.buffer.line_count());
+}
+
+#[test]
+fn test_regression_tab_indentation_consistency() {
+    let code = "\t\t\tfoo\n\tlet x = 1;\n\t\t\t\n";
+    let buffer = TextBuffer::from_str(code);
+    let mut minimap = MinimapState::new();
+    minimap.update_from_buffer(&buffer);
+
+    let lines = minimap.cached_lines();
+    assert_eq!(lines.len(), 4);
+
+    // Line 0: "\t\t\tfoo" -> 3 tabs = 12 cols indent, total 12 + 3 = 15 cols length
+    assert_eq!(lines[0].indent, 12);
+    assert_eq!(lines[0].length, 15);
+    assert_eq!(lines[0].content_length(), 3);
+    assert!(!lines[0].is_empty());
+    assert!(lines[0].indent <= lines[0].length);
+
+    // Line 1: "\tlet x = 1;" -> 1 tab = 4 cols indent, total 4 + 10 = 14 cols length
+    assert_eq!(lines[1].indent, 4);
+    assert_eq!(lines[1].length, 14);
+    assert_eq!(lines[1].content_length(), 10);
+    assert!(!lines[1].is_empty());
+
+    // Line 2: "\t\t\t" -> 3 tabs whitespace only
+    assert_eq!(lines[2].indent, 12);
+    assert_eq!(lines[2].length, 12);
+    assert_eq!(lines[2].content_length(), 0);
+    assert!(lines[2].is_empty());
+
+    // Also test update_from_str
+    let mut minimap2 = MinimapState::new();
+    minimap2.update_from_str(code);
+    let lines2 = minimap2.cached_lines();
+    assert_eq!(lines2[0].indent, 12);
+    assert_eq!(lines2[0].length, 15);
+    assert_eq!(lines2[0].content_length(), 3);
+    assert!(!lines2[0].is_empty());
+}
+
+#[test]
+fn test_regression_short_file_effective_track_height() {
+    // 10 lines on a 1000px tall window: natural height = 10 * 3.0 = 30.0px
+    let track_h = effective_track_height(10, 1000.0, 3.0);
+    assert_eq!(track_h, 30.0);
+
+    // 500 lines on a 1000px window: natural height = 1500px > 1000px -> 1000.0px
+    let track_h_large = effective_track_height(500, 1000.0, 3.0);
+    assert_eq!(track_h_large, 1000.0);
+
+    // Coordinate translation using effective track height
+    // Halfway down 30px track maps to line 5
+    assert_eq!(minimap_line_to_editor_line(15.0, 10, track_h), 5);
+
+    // Viewport thumb on 10 lines within 30px track
+    let thumb = compute_thumb_rect(0, 5, 10, track_h, 10.0);
+    assert_eq!(thumb.y, 0.0);
+    assert_eq!(thumb.height, 15.0); // 5/10 of 30px = 15px
+
+    // Thumb at bottom of 10 lines
+    let thumb_bottom = compute_thumb_rect(5, 5, 10, track_h, 10.0);
+    assert_eq!(thumb_bottom.bottom(), 30.0);
+}
+
+#[test]
+fn test_regression_minimap_scroll_target_tracking() {
+    let mut minimap = MinimapState::new();
+    assert_eq!(minimap.scroll_target, None);
+
+    minimap.scroll_target = Some(42);
+    assert_eq!(minimap.scroll_target.take(), Some(42));
+    assert_eq!(minimap.scroll_target, None);
 }

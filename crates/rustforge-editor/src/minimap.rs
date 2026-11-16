@@ -93,6 +93,8 @@ pub struct MinimapState {
     pub min_thumb_height: f32,
     /// Whether the viewport thumb is actively being dragged.
     pub is_dragging: bool,
+    /// Pending scroll target requested by a click or drag on the minimap.
+    pub scroll_target: Option<usize>,
     /// Cached line density metrics.
     cached_lines: Vec<MinimapLine>,
 }
@@ -112,6 +114,7 @@ impl MinimapState {
             max_columns: 100,
             min_thumb_height: 20.0,
             is_dragging: false,
+            scroll_target: None,
             cached_lines: Vec::new(),
         }
     }
@@ -168,12 +171,11 @@ impl MinimapState {
                 if ch == '\r' || ch == '\n' {
                     break;
                 }
-                length += 1;
+                let char_cols = if ch == '\t' { 4 } else { 1 };
+                length += char_cols;
                 if counting_indent {
-                    if ch == ' ' {
-                        indent += 1;
-                    } else if ch == '\t' {
-                        indent += 4;
+                    if ch == ' ' || ch == '\t' {
+                        indent += char_cols;
                     } else {
                         counting_indent = false;
                     }
@@ -199,17 +201,26 @@ impl MinimapState {
         for (i, line_str) in lines.into_iter().enumerate() {
             let clean = line_str.trim_end_matches(['\r', '\n']);
             let mut indent = 0;
+            let mut length = 0;
             let mut counting = true;
             for ch in clean.chars() {
-                if counting && (ch == ' ' || ch == '\t') {
-                    indent += if ch == '\t' { 4 } else { 1 };
-                } else {
-                    counting = false;
+                let char_cols = if ch == '\t' { 4 } else { 1 };
+                length += char_cols;
+                if counting {
+                    if ch == ' ' || ch == '\t' {
+                        indent += char_cols;
+                    } else {
+                        counting = false;
+                    }
                 }
             }
-            let length = clean.chars().count();
             self.cached_lines.push(MinimapLine::new(i, indent, length, self.max_columns));
         }
+    }
+
+    /// Returns the effective track height for the minimap content.
+    pub fn effective_height(&self, total_lines: usize, available_height: f32) -> f32 {
+        effective_track_height(total_lines, available_height, 3.0)
     }
 
     /// Directly sets or updates metrics for a specific line.
@@ -262,6 +273,23 @@ impl MinimapState {
 // ---------------------------------------------------------------------------
 // Standalone geometry & coordinate translation functions
 // ---------------------------------------------------------------------------
+
+/// Calculates the effective track height for the minimap content.
+///
+/// When the document has few lines such that `total_lines * line_spacing < available_height`,
+/// the effective track height is bounded to the natural content height (at least 20px) so
+/// lines, thumb geometry, and mouse coordinate translations remain perfectly synchronized.
+pub fn effective_track_height(total_lines: usize, available_height: f32, line_spacing: f32) -> f32 {
+    if total_lines == 0 || available_height <= 0.0 {
+        return 0.0;
+    }
+    let natural_height = total_lines as f32 * line_spacing;
+    if natural_height < available_height {
+        natural_height.max(20.0).min(available_height)
+    } else {
+        available_height
+    }
+}
 
 /// Translates a vertical pixel coordinate in the minimap to a buffer line index.
 pub fn minimap_line_to_editor_line(minimap_y: f32, total_lines: usize, height: f32) -> usize {

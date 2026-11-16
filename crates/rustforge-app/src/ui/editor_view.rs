@@ -98,6 +98,7 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
     // Handle keyboard input for active editor if focused
     let is_focused = app.focused_panel == crate::app::FocusedPanel::Editor;
     let mut nav_key_pressed = false;
+    let mut set_editor_focus = false;
     if is_focused {
         let input = ui.input(|i| i.clone());
 
@@ -166,6 +167,13 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
     let editor_width = (ui.available_width() - minimap_width).max(80.0);
     let is_minimap_dragging = editor.minimap.is_dragging;
 
+    // Consume any pending scroll request from minimap interaction
+    let minimap_target = editor.minimap.scroll_target.take();
+    let has_scroll_target = minimap_target.is_some();
+    if let Some(target) = minimap_target {
+        editor.scroll_line = target;
+    }
+
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
 
@@ -177,7 +185,7 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
                 let mut scroll_area = ScrollArea::vertical()
                     .auto_shrink([false, false]);
 
-                if is_minimap_dragging || nav_key_pressed {
+                if is_minimap_dragging || nav_key_pressed || has_scroll_target {
                     scroll_area = scroll_area.vertical_scroll_offset(editor.scroll_line as f32 * line_height);
                 }
 
@@ -213,7 +221,7 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
                     let end_line = ((ui.clip_rect().max.y - rect.min.y) / line_height).ceil() as usize;
                     let end_line = end_line.min(total_lines);
 
-                    if !is_minimap_dragging {
+                    if !is_minimap_dragging && !has_scroll_target {
                         editor.scroll_line = start_line;
                     }
 
@@ -302,8 +310,9 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
                         }
                     }
 
-                    // Click inside editor to position cursor
+                    // Click inside editor to position cursor and grant focus
                     if response.clicked() {
+                        set_editor_focus = true;
                         if let Some(mouse_pos) = response.interact_pointer_pos() {
                             let clicked_line = ((mouse_pos.y - rect.min.y) / line_height).floor().max(0.0) as usize;
                             let clicked_line = clicked_line.min(total_lines.saturating_sub(1));
@@ -320,9 +329,16 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
 
         // 2. Minimap Gutter (100px wide sleek bar on the right side)
         if show_minimap {
-            render_minimap(editor, theme, ui, available_height, line_height);
+            let minimap_interacted = render_minimap(editor, theme, ui, available_height, line_height);
+            if minimap_interacted {
+                set_editor_focus = true;
+            }
         }
     });
+
+    if set_editor_focus {
+        app.focused_panel = crate::app::FocusedPanel::Editor;
+    }
 }
 
 fn render_minimap(
@@ -331,10 +347,11 @@ fn render_minimap(
     ui: &mut Ui,
     height: f32,
     _line_height: f32,
-) {
+) -> bool {
     let minimap_width = editor.minimap.width.max(60.0);
     let total_lines = editor.buffer.line_count();
     let primary_pos = editor.primary_position();
+    let mut user_interacted = false;
 
     let (minimap_rect, response) = ui.allocate_exact_size(
         vec2(minimap_width, height),
@@ -350,25 +367,20 @@ fn render_minimap(
         Stroke::new(1.0_f32, theme.border),
     );
 
-    // 2. Code density bars
+    // 2. Harmonized effective track height
+    let track_height = editor.minimap.effective_height(total_lines, height);
+
+    // 3. Code density bars with zero-allocation slice iteration
     if total_lines > 0 {
-        let lines = editor.minimap_lines();
-        let scale_y = height / total_lines as f32;
-        let minimap_line_h = if total_lines as f32 * 3.0 <= height {
-            2.0_f32
-        } else {
-            (scale_y * 0.8).clamp(1.0, 3.0)
-        };
-        let line_step = if total_lines as f32 * 3.0 <= height {
-            3.0_f32
-        } else {
-            scale_y
-        };
+        let lines = editor.minimap.cached_lines();
+        let scale_y = track_height / total_lines as f32;
+        let minimap_line_h = (scale_y * 0.8).clamp(1.0, 3.0);
+        let line_step = scale_y;
 
         let content_width = (minimap_width - 12.0).max(10.0);
         let mut last_drawn_y = -10.0_f32;
 
-        for line in &lines {
+        for line in lines.iter().take(total_lines) {
             if line.length > 0 && !line.is_empty() {
                 let y = minimap_rect.min.y + (line.line as f32 * line_step);
                 if y >= minimap_rect.min.y && y + minimap_line_h <= minimap_rect.max.y + 2.0 {
@@ -408,12 +420,12 @@ fn render_minimap(
         }
     }
 
-    // 3. Draggable semi-transparent viewport thumb
+    // 4. Draggable semi-transparent viewport thumb
     let thumb = editor.minimap.compute_thumb(
         editor.scroll_line,
         editor.visible_lines,
         total_lines,
-        height,
+        track_height,
     );
     let thumb_rect = Rect::from_min_size(
         pos2(minimap_rect.min.x, minimap_rect.min.y + thumb.y),
@@ -442,18 +454,21 @@ fn render_minimap(
 
     painter.rect(thumb_rect, 2.0, thumb_fill, thumb_stroke);
 
-    // 4. Interactivity: Click and Drag to update scroll_line
+    // 5. Interactivity: Click and Drag to update scroll_line with persistence
     if response.drag_started() {
         editor.minimap.is_dragging = true;
+        user_interacted = true;
         if let Some(pos) = response.interact_pointer_pos() {
             let rel_y = pos.y - minimap_rect.min.y;
             if !thumb_rect.contains(pos) {
-                editor.scroll_line = click_to_scroll_line(
+                let target = click_to_scroll_line(
                     rel_y,
                     total_lines,
                     editor.visible_lines,
-                    height,
+                    track_height,
                 );
+                editor.scroll_line = target;
+                editor.minimap.scroll_target = Some(target);
             }
         }
         ui.ctx().request_repaint();
@@ -461,16 +476,19 @@ fn render_minimap(
 
     if response.dragged() {
         editor.minimap.is_dragging = true;
+        user_interacted = true;
         if let Some(pos) = response.interact_pointer_pos() {
             let rel_y = pos.y - minimap_rect.min.y;
             let target_thumb_y = rel_y - (thumb.height / 2.0);
-            editor.scroll_line = thumb_y_to_scroll_line(
+            let target = thumb_y_to_scroll_line(
                 target_thumb_y,
                 thumb.height,
                 total_lines,
                 editor.visible_lines,
-                height,
+                track_height,
             );
+            editor.scroll_line = target;
+            editor.minimap.scroll_target = Some(target);
         }
         ui.ctx().request_repaint();
     }
@@ -481,17 +499,22 @@ fn render_minimap(
     }
 
     if response.clicked() {
+        user_interacted = true;
         if let Some(pos) = response.interact_pointer_pos() {
             let rel_y = pos.y - minimap_rect.min.y;
-            editor.scroll_line = click_to_scroll_line(
+            let target = click_to_scroll_line(
                 rel_y,
                 total_lines,
                 editor.visible_lines,
-                height,
+                track_height,
             );
+            editor.scroll_line = target;
+            editor.minimap.scroll_target = Some(target);
             ui.ctx().request_repaint();
         }
     }
+
+    user_interacted
 }
 
 fn render_find_bar(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) {

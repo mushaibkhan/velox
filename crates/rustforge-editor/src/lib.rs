@@ -7,8 +7,8 @@ pub use cursor::{normalize_selections, Direction};
 pub use find::FindState;
 pub use minimap::{
     click_to_scroll_line, compute_thumb_rect, editor_line_to_minimap_y,
-    minimap_line_to_editor_line, minimap_y_to_editor_line, thumb_y_to_scroll_line,
-    MinimapLine, MinimapState, MinimapThumb,
+    effective_track_height, minimap_line_to_editor_line, minimap_y_to_editor_line,
+    thumb_y_to_scroll_line, MinimapLine, MinimapState, MinimapThumb,
 };
 pub use state::EditorState;
 
