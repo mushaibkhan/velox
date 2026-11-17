@@ -315,7 +315,12 @@ impl LspClient {
             return Err(LspError::Disconnected);
         }
 
-        match rx.await {
+        let timeout = std::time::Duration::from_secs(10);
+        let resp = tokio::time::timeout(timeout, rx)
+            .await
+            .map_err(|_| LspError::Timeout)?;
+
+        match resp {
             Ok(Ok(val)) => {
                 let res = serde_json::from_value(val)?;
                 Ok(res)

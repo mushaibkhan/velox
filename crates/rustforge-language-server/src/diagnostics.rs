@@ -153,7 +153,8 @@ pub fn uri_to_path(uri: &lsp_types::Uri) -> PathBuf {
     if let Some(rest) = s.strip_prefix("file://") {
         #[cfg(windows)]
         let rest = rest.strip_prefix('/').unwrap_or(rest);
-        normalize_path(Path::new(rest))
+        let decoded = rest.replace("%20", " ");
+        normalize_path(Path::new(&decoded))
     } else {
         PathBuf::from(s)
     }
@@ -168,11 +169,12 @@ pub fn path_to_uri(path: &Path) -> Result<lsp_types::Uri, String> {
             .map_err(|e| e.to_string())?
             .join(path)
     };
-    let path_str = abs.to_string_lossy();
-    let uri_str = if path_str.starts_with('/') {
-        format!("file://{path_str}")
+    let path_str = abs.to_string_lossy().replace('\\', "/");
+    let encoded = path_str.replace(' ', "%20");
+    let uri_str = if encoded.starts_with('/') {
+        format!("file://{encoded}")
     } else {
-        format!("file:///{path_str}")
+        format!("file:///{encoded}")
     };
     uri_str.parse::<lsp_types::Uri>().map_err(|e| e.to_string())
 }
@@ -220,12 +222,14 @@ impl DiagnosticStore {
     /// Supports exact path matches, canonicalized paths, and relative suffix matching.
     pub fn get_diagnostics_for_path(&self, path: &Path) -> Vec<DiagnosticItem> {
         let read = self.store.read();
-        let norm = normalize_path(path);
 
-        if let Some(items) = read.get(&norm) {
+        // Fast path: direct path match without filesystem canonicalization
+        if let Some(items) = read.get(path) {
             return items.clone();
         }
-        if let Some(items) = read.get(path) {
+
+        let norm = normalize_path(path);
+        if let Some(items) = read.get(&norm) {
             return items.clone();
         }
 
@@ -250,7 +254,19 @@ impl DiagnosticStore {
         let target = line_0_based as usize;
         self.get_diagnostics_for_path(path)
             .into_iter()
-            .filter(|item| item.range.start.line <= target && target <= item.range.end.line)
+            .filter(|item| {
+                if target < item.range.start.line || target > item.range.end.line {
+                    return false;
+                }
+                // Exclude multi-line ranges that terminate at column 0 of target line
+                if target == item.range.end.line
+                    && item.range.end.column == 0
+                    && item.range.end.line > item.range.start.line
+                {
+                    return false;
+                }
+                true
+            })
             .collect()
     }
 
