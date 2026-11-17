@@ -10,6 +10,7 @@ members = [
     "crates/rustforge-themes",
     "crates/rustforge-settings",
     "crates/rustforge-search",
+    "crates/rustforge-git",
     "crates/rustforge-app",
 ]
 
@@ -28,6 +29,7 @@ rustforge-workspace = { path = "crates/rustforge-workspace" }
 rustforge-themes = { path = "crates/rustforge-themes" }
 rustforge-settings = { path = "crates/rustforge-settings" }
 rustforge-search = { path = "crates/rustforge-search" }
+rustforge-git = { path = "crates/rustforge-git" }
 
 ropey = "1.6"
 portable-pty = "0.8"
