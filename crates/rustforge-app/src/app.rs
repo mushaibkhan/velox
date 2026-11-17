@@ -404,6 +404,8 @@ impl RustForgeApp {
             if need_discover {
                 self.git_repo = rustforge_git::GitRepository::discover(root);
             }
+        } else {
+            self.git_repo = None;
         }
 
         if let Some(repo) = &self.git_repo {
@@ -466,10 +468,17 @@ impl RustForgeApp {
                 tracing::warn!("Failed to discard file {:?}: {}", path, e);
             }
         }
+        let full_path = if path.is_absolute() {
+            path.to_path_buf()
+        } else if let Some(repo) = &self.git_repo {
+            repo.workdir().join(path)
+        } else {
+            path.to_path_buf()
+        };
         for tab in &mut self.tabs {
             if tab.diff_view.is_none() {
                 if let Some(tab_path) = tab.path() {
-                    if paths_match(tab_path, path) {
+                    if paths_match(tab_path, &full_path) {
                         let _ = tab.reload_from_disk();
                     }
                 }

@@ -244,7 +244,12 @@ fn render_git_tab(app: &mut RustForgeApp, ui: &mut Ui) {
 
     ui.add_space(4.0);
 
-    let can_commit = !app.git_commit_message.trim().is_empty();
+    let has_staged = app
+        .git_status
+        .as_ref()
+        .map(|s| !s.staged.is_empty())
+        .unwrap_or(false);
+    let can_commit = !app.git_commit_message.trim().is_empty() && has_staged;
     let mut do_commit = false;
 
     ui.horizontal(|ui| {
@@ -259,7 +264,9 @@ fn render_git_tab(app: &mut RustForgeApp, ui: &mut Ui) {
     });
 
     if do_commit {
-        let _ = app.commit();
+        if let Err(e) = app.commit() {
+            tracing::warn!("Commit failed: {}", e);
+        }
     }
 
     ui.add_space(6.0);
