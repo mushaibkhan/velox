@@ -14,10 +14,21 @@ pub fn render_editor_area(app: &mut RustForgeApp, ui: &mut Ui) {
 
         if let Some(active_idx) = app.active_tab_idx {
             if active_idx < app.tabs.len() {
-                if app.tabs[active_idx].has_external_conflict {
-                    render_conflict_banner(app, active_idx, ui);
+                if let Some(ref diff_state) = app.tabs[active_idx].diff_view {
+                    crate::ui::diff_view::render_diff_view(
+                        ui,
+                        &app.theme,
+                        &diff_state.diff,
+                        &diff_state.old_label,
+                        &diff_state.new_label,
+                        true,
+                    );
+                } else {
+                    if app.tabs[active_idx].has_external_conflict {
+                        render_conflict_banner(app, active_idx, ui);
+                    }
+                    render_active_editor(app, active_idx, ui);
                 }
-                render_active_editor(app, active_idx, ui);
             } else {
                 render_empty_editor(app, ui);
             }

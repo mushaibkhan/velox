@@ -60,6 +60,13 @@ pub struct RustForgeApp {
     pub file_watcher: Option<rustforge_workspace::FileWatcher>,
     pub file_event_rx: Option<std::sync::mpsc::Receiver<rustforge_workspace::FileEvent>>,
     pub egui_ctx: Option<egui::Context>,
+
+    // Git
+    pub git_repo: Option<rustforge_git::GitRepository>,
+    pub git_status: Option<rustforge_git::RepoStatus>,
+    pub git_branch: String,
+    pub git_ahead_behind: (usize, usize),
+    pub git_commit_message: String,
 }
 
 impl RustForgeApp {
@@ -106,6 +113,11 @@ impl RustForgeApp {
             file_watcher: None,
             file_event_rx: None,
             egui_ctx,
+            git_repo: None,
+            git_status: None,
+            git_branch: String::new(),
+            git_ahead_behind: (0, 0),
+            git_commit_message: String::new(),
         };
 
         // Try to start default terminal session with egui repaint callback
@@ -114,9 +126,52 @@ impl RustForgeApp {
         // Start file watcher for initial workspace root if available
         app.start_file_watcher();
 
+        // Initialize Git repo & status from workspace root
+        app.refresh_git();
+
         // Create an initial welcome/untitled file
         app.new_file();
 
+        app
+    }
+
+    pub fn new_test_app() -> Self {
+        let settings = Settings::default();
+        let theme = Theme::dark_modern();
+        let workspace = Workspace::new();
+        let mut commands = Vec::new();
+        Self::register_commands(&mut commands);
+
+        let mut app = Self {
+            theme,
+            settings,
+            workspace,
+            tabs: Vec::new(),
+            active_tab_idx: None,
+            terminal: None,
+            active_sidebar: SidebarTab::Explorer,
+            sidebar_visible: true,
+            terminal_visible: false,
+            focused_panel: FocusedPanel::Editor,
+            sidebar_width: 250.0,
+            terminal_height: 220.0,
+            search_query: String::new(),
+            search_results: Vec::new(),
+            command_palette_open: false,
+            quick_open_open: false,
+            palette_query: String::new(),
+            palette_selected_idx: 0,
+            commands,
+            file_watcher: None,
+            file_event_rx: None,
+            egui_ctx: None,
+            git_repo: None,
+            git_status: None,
+            git_branch: String::new(),
+            git_ahead_behind: (0, 0),
+            git_commit_message: String::new(),
+        };
+        app.refresh_git();
         app
     }
 
@@ -241,18 +296,25 @@ impl RustForgeApp {
 
     pub fn open_file(&mut self, path: impl AsRef<Path>) {
         let path = path.as_ref();
-        // If already open, switch to it
+        // If already open (in a normal editor tab), switch to it
         for (idx, tab) in self.tabs.iter().enumerate() {
-            if let Some(p) = tab.path() {
-                if p == path {
-                    self.active_tab_idx = Some(idx);
-                    return;
+            if tab.diff_view.is_none() {
+                if let Some(p) = tab.path() {
+                    if paths_match(p, path) {
+                        self.active_tab_idx = Some(idx);
+                        return;
+                    }
                 }
             }
         }
 
         if let Ok(buffer) = TextBuffer::from_file(path) {
-            let editor = EditorState::new(buffer);
+            let mut editor = EditorState::new(buffer);
+            if let Some(repo) = &self.git_repo {
+                if let Ok(diff) = repo.diff_file(path) {
+                    editor.set_git_diff(Some(diff));
+                }
+            }
             let tab = Tab::new(editor);
             self.tabs.push(tab);
             self.active_tab_idx = Some(self.tabs.len() - 1);
@@ -274,9 +336,14 @@ impl RustForgeApp {
 
     pub fn open_folder_dialog(&mut self) {
         if let Some(folder) = rfd::FileDialog::new().pick_folder() {
-            self.workspace.open(&folder);
-            self.start_file_watcher();
+            self.open_workspace(&folder);
         }
+    }
+
+    pub fn open_workspace(&mut self, path: impl AsRef<Path>) {
+        self.workspace.open(path);
+        self.start_file_watcher();
+        self.refresh_git();
     }
 
     pub fn open_file_dialog(&mut self) {
@@ -288,14 +355,19 @@ impl RustForgeApp {
     pub fn save_current_file(&mut self) {
         if let Some(idx) = self.active_tab_idx {
             if let Some(tab) = self.tabs.get_mut(idx) {
+                if tab.diff_view.is_some() {
+                    return;
+                }
                 if tab.path().is_some() {
                     let _ = tab.editor.buffer.save();
                     tab.last_save_time = Some(std::time::Instant::now());
                     tab.update_title();
                 } else {
                     self.save_current_file_as();
+                    return;
                 }
             }
+            self.refresh_git();
         }
     }
 
@@ -303,12 +375,192 @@ impl RustForgeApp {
         if let Some(idx) = self.active_tab_idx {
             if let Some(dest) = rfd::FileDialog::new().save_file() {
                 if let Some(tab) = self.tabs.get_mut(idx) {
+                    if tab.diff_view.is_some() {
+                        return;
+                    }
                     let _ = tab.editor.buffer.save_as(&dest);
                     tab.last_save_time = Some(std::time::Instant::now());
                     tab.update_title();
                 }
+                self.refresh_git();
             }
         }
+    }
+
+    pub fn refresh_git(&mut self) {
+        if let Some(root) = &self.workspace.root_path {
+            let need_discover = match &self.git_repo {
+                Some(repo) => {
+                    let repo_workdir = repo.workdir();
+                    if let (Ok(c_root), Ok(c_workdir)) = (root.canonicalize(), repo_workdir.canonicalize()) {
+                        !c_root.starts_with(&c_workdir)
+                    } else {
+                        !root.starts_with(repo_workdir)
+                    }
+                }
+                None => true,
+            };
+
+            if need_discover {
+                self.git_repo = rustforge_git::GitRepository::discover(root);
+            }
+        }
+
+        if let Some(repo) = &self.git_repo {
+            self.git_status = repo.status().ok();
+            self.git_branch = repo.current_branch().unwrap_or_else(|_| "HEAD".to_string());
+            if let Ok(status) = repo.branch_status() {
+                self.git_ahead_behind = (status.ahead, status.behind);
+            } else {
+                self.git_ahead_behind = (0, 0);
+            }
+
+            for tab in &mut self.tabs {
+                if tab.diff_view.is_none() {
+                    if let Some(path) = tab.path() {
+                        if let Ok(diff) = repo.diff_file(path) {
+                            tab.editor.set_git_diff(Some(diff));
+                        } else {
+                            tab.editor.set_git_diff(None);
+                        }
+                    }
+                } else if let Some(ref mut diff_state) = tab.diff_view {
+                    if let Ok(diff) = repo.diff_file(&diff_state.path) {
+                        diff_state.diff = diff;
+                    }
+                }
+            }
+        } else {
+            self.git_status = None;
+            self.git_branch.clear();
+            self.git_ahead_behind = (0, 0);
+            for tab in &mut self.tabs {
+                if tab.diff_view.is_none() {
+                    tab.editor.set_git_diff(None);
+                }
+            }
+        }
+    }
+
+    pub fn stage_file(&mut self, path: &Path) {
+        if let Some(repo) = &self.git_repo {
+            if let Err(e) = repo.stage_file(path) {
+                tracing::warn!("Failed to stage file {:?}: {}", path, e);
+            }
+        }
+        self.refresh_git();
+    }
+
+    pub fn unstage_file(&mut self, path: &Path) {
+        if let Some(repo) = &self.git_repo {
+            if let Err(e) = repo.unstage_file(path) {
+                tracing::warn!("Failed to unstage file {:?}: {}", path, e);
+            }
+        }
+        self.refresh_git();
+    }
+
+    pub fn discard_file(&mut self, path: &Path) {
+        if let Some(repo) = &self.git_repo {
+            if let Err(e) = repo.discard_file(path) {
+                tracing::warn!("Failed to discard file {:?}: {}", path, e);
+            }
+        }
+        for tab in &mut self.tabs {
+            if tab.diff_view.is_none() {
+                if let Some(tab_path) = tab.path() {
+                    if paths_match(tab_path, path) {
+                        let _ = tab.reload_from_disk();
+                    }
+                }
+            }
+        }
+        self.refresh_git();
+    }
+
+    pub fn stage_all(&mut self) {
+        if let Some(repo) = &self.git_repo {
+            if let Err(e) = repo.stage_all() {
+                tracing::warn!("Failed to stage all files: {}", e);
+            }
+        }
+        self.refresh_git();
+    }
+
+    pub fn commit(&mut self) -> Result<git2::Oid, String> {
+        let trimmed_msg = self.git_commit_message.trim();
+        if trimmed_msg.is_empty() {
+            return Err("Commit message cannot be empty".to_string());
+        }
+        let Some(repo) = &self.git_repo else {
+            return Err("Not a git repository".to_string());
+        };
+
+        let (name, email) = if let Ok(sig) = repo.raw().signature() {
+            (
+                sig.name().unwrap_or("RustForge User").to_string(),
+                sig.email().unwrap_or("user@rustforge.dev").to_string(),
+            )
+        } else {
+            ("RustForge User".to_string(), "user@rustforge.dev".to_string())
+        };
+
+        match repo.commit(trimmed_msg, &name, &email) {
+            Ok(oid) => {
+                self.git_commit_message.clear();
+                self.refresh_git();
+                Ok(oid)
+            }
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    pub fn open_diff_tab(&mut self, path: &Path) {
+        let full_path = if path.is_absolute() {
+            path.to_path_buf()
+        } else if let Some(repo) = &self.git_repo {
+            repo.workdir().join(path)
+        } else if let Some(root) = &self.workspace.root_path {
+            root.join(path)
+        } else {
+            path.to_path_buf()
+        };
+
+        for (idx, tab) in self.tabs.iter_mut().enumerate() {
+            if let Some(ref mut diff_state) = tab.diff_view {
+                if paths_match(&diff_state.path, &full_path)
+                    || diff_state.path == path
+                    || diff_state.path == full_path
+                {
+                    if let Some(repo) = &self.git_repo {
+                        if let Ok(diff) = repo.diff_file(&diff_state.path) {
+                            diff_state.diff = diff;
+                        }
+                    }
+                    self.active_tab_idx = Some(idx);
+                    self.focused_panel = FocusedPanel::Editor;
+                    return;
+                }
+            }
+        }
+
+        let diff = if let Some(repo) = &self.git_repo {
+            repo.diff_file(&full_path)
+                .unwrap_or_else(|_| rustforge_git::compute_diff("", ""))
+        } else {
+            rustforge_git::compute_diff("", "")
+        };
+
+        let file_name = full_path
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or("file");
+        let old_label = format!("HEAD:{}", file_name);
+        let new_label = format!("Working Tree:{}", file_name);
+        let tab = Tab::new_diff(full_path, diff, old_label, new_label);
+        self.tabs.push(tab);
+        self.active_tab_idx = Some(self.tabs.len() - 1);
+        self.focused_panel = FocusedPanel::Editor;
     }
 
     pub fn close_tab(&mut self, idx: usize) {
@@ -513,6 +765,7 @@ impl RustForgeApp {
 
         if refresh_workspace {
             self.workspace.refresh();
+            self.refresh_git();
         }
     }
 
@@ -522,6 +775,10 @@ impl RustForgeApp {
         // Ctrl+Shift+P => Command Palette
         if input.modifiers.ctrl && input.modifiers.shift && input.key_pressed(Key::P) {
             self.dispatch_action(Action::CommandPalette);
+        } else if input.modifiers.ctrl && input.modifiers.shift && input.key_pressed(Key::G) {
+            // Ctrl+Shift+G => Source Control
+            self.active_sidebar = SidebarTab::Git;
+            self.sidebar_visible = true;
         } else if input.modifiers.ctrl && input.key_pressed(Key::P) {
             // Ctrl+P => Quick Open
             self.dispatch_action(Action::QuickOpen);

@@ -178,14 +178,261 @@ fn render_search_tab(app: &mut RustForgeApp, ui: &mut Ui) {
     });
 }
 
+enum GitAction {
+    Stage(std::path::PathBuf),
+    Unstage(std::path::PathBuf),
+    Discard(std::path::PathBuf),
+    OpenDiff(std::path::PathBuf),
+}
+
 fn render_git_tab(app: &mut RustForgeApp, ui: &mut Ui) {
-    ui.label(RichText::new("SOURCE CONTROL").strong().size(11.0).color(app.theme.fg_secondary));
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("SOURCE CONTROL").strong().size(11.0).color(app.theme.fg_secondary));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.small_button("🔄").on_hover_text("Refresh Git Status").clicked() {
+                app.refresh_git();
+            }
+            if app.git_repo.is_some()
+                && ui.small_button("+").on_hover_text("Stage All Changes").clicked()
+            {
+                app.stage_all();
+            }
+        });
+    });
     ui.separator();
 
-    ui.label(RichText::new("🌿 Branch: master / main").color(app.theme.fg_primary));
-    ui.add_space(8.0);
+    if app.git_repo.is_none() {
+        ui.add_space(20.0);
+        ui.vertical_centered(|ui| {
+            ui.label(RichText::new("Not a git repository").color(app.theme.fg_muted).size(13.0));
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new("Open a folder inside a git repository to track changes.")
+                    .color(app.theme.fg_muted)
+                    .size(11.0),
+            );
+        });
+        return;
+    }
 
-    ui.label(RichText::new("Working Tree Clean").color(app.theme.fg_muted).size(12.0));
+    // Branch & Ahead/Behind display
+    let (ahead, behind) = app.git_ahead_behind;
+    let sync_text = match (ahead, behind) {
+        (0, 0) => String::new(),
+        (a, 0) => format!(" ↑{}", a),
+        (0, b) => format!(" ↓{}", b),
+        (a, b) => format!(" ↑{} ↓{}", a, b),
+    };
+    let branch_name = if app.git_branch.is_empty() { "HEAD" } else { &app.git_branch };
+    ui.label(
+        RichText::new(format!("🌿 {}{}", branch_name, sync_text))
+            .color(app.theme.fg_primary)
+            .strong()
+            .size(12.0),
+    );
+    ui.add_space(6.0);
+
+    // Commit Message & Button
+    let commit_resp = ui.add(
+        TextEdit::multiline(&mut app.git_commit_message)
+            .hint_text("Message (Ctrl+Enter to commit)")
+            .desired_rows(2)
+            .desired_width(ui.available_width()),
+    );
+    let ctrl_enter = commit_resp.has_focus()
+        && ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Enter));
+
+    ui.add_space(4.0);
+
+    let can_commit = !app.git_commit_message.trim().is_empty();
+    let mut do_commit = false;
+
+    ui.horizontal(|ui| {
+        let btn = ui.add_enabled(
+            can_commit,
+            egui::Button::new(RichText::new("✔ Commit").size(11.0).color(egui::Color32::WHITE))
+                .fill(if can_commit { app.theme.fg_accent } else { app.theme.bg_tab_inactive }),
+        );
+        if btn.clicked() || (ctrl_enter && can_commit) {
+            do_commit = true;
+        }
+    });
+
+    if do_commit {
+        let _ = app.commit();
+    }
+
+    ui.add_space(6.0);
+    ui.separator();
+
+    let is_clean = app.git_status.as_ref().map(|s| s.is_clean()).unwrap_or(true);
+    if is_clean {
+        ui.add_space(20.0);
+        ui.vertical_centered(|ui| {
+            ui.label(RichText::new("Working tree clean").color(app.theme.fg_muted).size(12.0));
+        });
+        return;
+    }
+
+    let mut actions = Vec::new();
+
+    ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            if let Some(status) = &app.git_status {
+                // 1. Staged Changes
+                if !status.staged.is_empty() {
+                    egui::CollapsingHeader::new(
+                        RichText::new(format!("STAGED CHANGES ({})", status.staged.len()))
+                            .strong()
+                            .size(11.0)
+                            .color(app.theme.fg_secondary),
+                    )
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        for item in &status.staged {
+                            render_file_status_row(
+                                ui,
+                                &item.path,
+                                Some(item.status),
+                                true,  // is_staged
+                                false, // is_untracked
+                                &app.theme,
+                                &mut actions,
+                            );
+                        }
+                    });
+                }
+
+                // 2. Changes (Unstaged)
+                if !status.unstaged.is_empty() {
+                    egui::CollapsingHeader::new(
+                        RichText::new(format!("CHANGES ({})", status.unstaged.len()))
+                            .strong()
+                            .size(11.0)
+                            .color(app.theme.fg_secondary),
+                    )
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        for item in &status.unstaged {
+                            render_file_status_row(
+                                ui,
+                                &item.path,
+                                Some(item.status),
+                                false, // is_staged
+                                false, // is_untracked
+                                &app.theme,
+                                &mut actions,
+                            );
+                        }
+                    });
+                }
+
+                // 3. Untracked Files
+                if !status.untracked.is_empty() {
+                    egui::CollapsingHeader::new(
+                        RichText::new(format!("UNTRACKED ({})", status.untracked.len()))
+                            .strong()
+                            .size(11.0)
+                            .color(app.theme.fg_secondary),
+                    )
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        for path in &status.untracked {
+                            render_file_status_row(
+                                ui,
+                                path,
+                                None,
+                                false, // is_staged
+                                true,  // is_untracked
+                                &app.theme,
+                                &mut actions,
+                            );
+                        }
+                    });
+                }
+            }
+        });
+
+    for action in actions {
+        match action {
+            GitAction::Stage(p) => app.stage_file(&p),
+            GitAction::Unstage(p) => app.unstage_file(&p),
+            GitAction::Discard(p) => app.discard_file(&p),
+            GitAction::OpenDiff(p) => app.open_diff_tab(&p),
+        }
+    }
+}
+
+fn render_file_status_row(
+    ui: &mut Ui,
+    path: &std::path::Path,
+    change_type: Option<rustforge_git::FileChangeType>,
+    is_staged: bool,
+    is_untracked: bool,
+    theme: &rustforge_themes::Theme,
+    actions: &mut Vec<GitAction>,
+) {
+    ui.horizontal(|ui| {
+        let (tag, tag_color) = if is_untracked {
+            ("U", egui::Color32::from_rgb(115, 201, 145))
+        } else {
+            match change_type {
+                Some(rustforge_git::FileChangeType::Added) => ("A", egui::Color32::from_rgb(115, 201, 145)),
+                Some(rustforge_git::FileChangeType::Modified) => ("M", egui::Color32::from_rgb(229, 192, 123)),
+                Some(rustforge_git::FileChangeType::Deleted) => ("D", egui::Color32::from_rgb(224, 108, 117)),
+                Some(rustforge_git::FileChangeType::Renamed) => ("R", egui::Color32::from_rgb(97, 175, 239)),
+                Some(rustforge_git::FileChangeType::Typechange) => ("T", egui::Color32::from_rgb(198, 120, 221)),
+                None => (" ", theme.fg_muted),
+            }
+        };
+
+        // Status badge
+        ui.label(RichText::new(tag).strong().size(11.0).color(tag_color));
+
+        // File display name and optional folder
+        let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+        let parent = path.parent().and_then(|p| {
+            let s = p.to_string_lossy();
+            if s.is_empty() { None } else { Some(s) }
+        });
+
+        let display_text = if let Some(dir) = parent {
+            format!("{} ({})", file_name, dir)
+        } else {
+            file_name.to_string()
+        };
+
+        let label_btn = ui.selectable_label(
+            false,
+            RichText::new(display_text).size(12.0).color(theme.fg_primary),
+        ).on_hover_text("Click to view diff");
+        if label_btn.clicked() {
+            actions.push(GitAction::OpenDiff(path.to_path_buf()));
+        }
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if is_staged {
+                if ui.small_button("−").on_hover_text("Unstage Changes").clicked() {
+                    actions.push(GitAction::Unstage(path.to_path_buf()));
+                }
+            } else if is_untracked {
+                if ui.small_button("🗑").on_hover_text("Delete File").clicked() {
+                    actions.push(GitAction::Discard(path.to_path_buf()));
+                }
+                if ui.small_button("+").on_hover_text("Stage File").clicked() {
+                    actions.push(GitAction::Stage(path.to_path_buf()));
+                }
+            } else {
+                if ui.small_button("↺").on_hover_text("Discard Changes").clicked() {
+                    actions.push(GitAction::Discard(path.to_path_buf()));
+                }
+                if ui.small_button("+").on_hover_text("Stage Changes").clicked() {
+                    actions.push(GitAction::Stage(path.to_path_buf()));
+                }
+            }
+        });
+    });
 }
 
 fn render_settings_tab(app: &mut RustForgeApp, ui: &mut Ui) {

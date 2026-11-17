@@ -7,6 +7,8 @@ pub mod blame;
 pub mod diff;
 pub mod repository;
 
+pub use git2;
+pub use git2::Oid;
 pub use blame::{blame_line, format_relative_time, BlameInfo};
 pub use diff::{compute_diff, DiffHunk, DiffLine, FileDiff, InlineSpan, LineChange};
 pub use repository::{

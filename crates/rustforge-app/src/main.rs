@@ -1,9 +1,5 @@
-mod app;
-mod tab;
-mod ui;
-
-use app::RustForgeApp;
 use eframe::NativeOptions;
+use rustforge_app::RustForgeApp;
 use rustforge_core::init_logging;
 
 fn main() -> eframe::Result<()> {

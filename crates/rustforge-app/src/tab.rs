@@ -1,8 +1,16 @@
 use rustforge_core::TabId;
 use rustforge_editor::EditorState;
 use rustforge_text_buffer::TextBuffer;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
+
+#[derive(Debug, Clone)]
+pub struct DiffTabState {
+    pub diff: rustforge_git::FileDiff,
+    pub old_label: String,
+    pub new_label: String,
+    pub path: PathBuf,
+}
 
 pub struct Tab {
     #[allow(dead_code)]
@@ -11,6 +19,7 @@ pub struct Tab {
     pub title: String,
     pub has_external_conflict: bool,
     pub last_save_time: Option<Instant>,
+    pub diff_view: Option<DiffTabState>,
 }
 
 impl Tab {
@@ -22,22 +31,70 @@ impl Tab {
             title,
             has_external_conflict: false,
             last_save_time: None,
+            diff_view: None,
+        }
+    }
+
+    pub fn new_diff(
+        path: impl Into<PathBuf>,
+        diff: rustforge_git::FileDiff,
+        old_label: impl Into<String>,
+        new_label: impl Into<String>,
+    ) -> Self {
+        let path = path.into();
+        let file_name = path
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or("diff");
+        let title = format!("Diff: {}", file_name);
+        Self {
+            id: TabId::new(),
+            editor: EditorState::new(TextBuffer::new()),
+            title,
+            has_external_conflict: false,
+            last_save_time: None,
+            diff_view: Some(DiffTabState {
+                diff,
+                old_label: old_label.into(),
+                new_label: new_label.into(),
+                path,
+            }),
         }
     }
 
     pub fn path(&self) -> Option<&Path> {
-        self.editor.buffer.path()
+        if let Some(diff_state) = &self.diff_view {
+            Some(&diff_state.path)
+        } else {
+            self.editor.buffer.path()
+        }
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.editor.buffer.is_dirty()
+        if self.diff_view.is_some() {
+            false
+        } else {
+            self.editor.buffer.is_dirty()
+        }
     }
 
     pub fn update_title(&mut self) {
-        self.title = self.editor.buffer.file_name();
+        if let Some(diff_state) = &self.diff_view {
+            let file_name = diff_state
+                .path
+                .file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or("diff");
+            self.title = format!("Diff: {}", file_name);
+        } else {
+            self.title = self.editor.buffer.file_name();
+        }
     }
 
     pub fn reload_from_disk(&mut self) -> Result<(), std::io::Error> {
+        if self.diff_view.is_some() {
+            return Ok(());
+        }
         if let Some(path) = self.path() {
             let new_buffer = TextBuffer::from_file(path)?;
             let prev_scroll = self.editor.scroll_line;
@@ -69,6 +126,17 @@ impl Tab {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn test_tab_new_diff() {
+        let diff = rustforge_git::compute_diff("old\n", "new\n");
+        let path = PathBuf::from("/path/to/file.rs");
+        let tab = Tab::new_diff(path.clone(), diff, "HEAD", "Working Tree");
+        assert_eq!(tab.title, "Diff: file.rs");
+        assert_eq!(tab.path(), Some(path.as_path()));
+        assert!(!tab.is_dirty());
+        assert!(tab.diff_view.is_some());
+    }
 
     #[test]
     fn test_tab_reload_from_disk() {
@@ -133,5 +201,3 @@ mod tests {
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }
-
-
