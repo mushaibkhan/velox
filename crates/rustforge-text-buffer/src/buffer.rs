@@ -50,7 +50,17 @@ impl TextBuffer {
 
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(text: &str) -> Self {
-        let line_ending = if text.contains("\r\n") {
+        let sample_len = text.len().min(4096);
+        let sample = if text.is_char_boundary(sample_len) {
+            &text[..sample_len]
+        } else {
+            let mut boundary = sample_len;
+            while boundary > 0 && !text.is_char_boundary(boundary) {
+                boundary -= 1;
+            }
+            &text[..boundary]
+        };
+        let line_ending = if sample.contains("\r\n") {
             LineEnding::Crlf
         } else {
             LineEnding::Lf
@@ -65,27 +75,41 @@ impl TextBuffer {
         }
     }
 
+    pub fn from_rope(rope: Rope) -> Self {
+        let sample_len = rope.len_chars().min(2048);
+        let sample = rope.slice(0..sample_len);
+        let mut line_ending = LineEnding::Lf;
+        let mut prev_cr = false;
+        for ch in sample.chars() {
+            if prev_cr && ch == '\n' {
+                line_ending = LineEnding::Crlf;
+                break;
+            }
+            prev_cr = ch == '\r';
+        }
+
+        Self {
+            id: BufferId::new(),
+            rope,
+            path: None,
+            is_dirty: false,
+            history: History::default(),
+            line_ending,
+        }
+    }
+
+    pub fn from_reader<R: std::io::Read>(reader: R) -> Result<Self, std::io::Error> {
+        let rope = Rope::from_reader(reader)?;
+        Ok(Self::from_rope(rope))
+    }
+
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, std::io::Error> {
         let path = path.as_ref().to_path_buf();
         let file = File::open(&path)?;
         let reader = BufReader::new(file);
-        let rope = Rope::from_reader(reader)?;
-        
-        let sample = rope.slice(0..rope.len_chars().min(2048)).to_string();
-        let line_ending = if sample.contains("\r\n") {
-            LineEnding::Crlf
-        } else {
-            LineEnding::Lf
-        };
-
-        Ok(Self {
-            id: BufferId::new(),
-            rope,
-            path: Some(path),
-            is_dirty: false,
-            history: History::default(),
-            line_ending,
-        })
+        let mut buffer = Self::from_reader(reader)?;
+        buffer.path = Some(path);
+        Ok(buffer)
     }
 
     pub fn id(&self) -> BufferId {
@@ -148,6 +172,35 @@ impl TextBuffer {
         self.line_slice(line_idx).map(|s| s.to_string())
     }
 
+    /// Returns an iterator over `RopeSlice` for lines in the specified line range `[start_line, end_line)`.
+    pub fn lines_range(&self, start_line: usize, end_line: usize) -> impl Iterator<Item = RopeSlice<'_>> {
+        let total_lines = self.line_count();
+        let start = start_line.min(total_lines);
+        let end = end_line.min(total_lines).max(start);
+        let count = end - start;
+
+        let iter = if start >= end || total_lines == 0 {
+            let slice = self.rope.slice(self.total_chars()..self.total_chars());
+            slice.lines()
+        } else {
+            let start_char = self.rope.line_to_char(start);
+            let end_char = if end < self.rope.len_lines() {
+                self.rope.line_to_char(end)
+            } else {
+                self.total_chars()
+            };
+            let slice = self.rope.slice(start_char..end_char);
+            slice.lines()
+        };
+        iter.take(count)
+    }
+
+    /// Slices up to `count` lines for a viewport starting at `start_line`.
+    pub fn viewport_lines(&self, start_line: usize, count: usize) -> Vec<RopeSlice<'_>> {
+        let end_line = start_line.saturating_add(count);
+        self.lines_range(start_line, end_line).collect()
+    }
+
     pub fn char_to_line(&self, char_offset: usize) -> usize {
         let clamped = char_offset.min(self.total_chars());
         self.rope.char_to_line(clamped)
@@ -174,14 +227,17 @@ impl TextBuffer {
         let line_slice = self.rope.line(pos.line);
         let line_chars = line_slice.len_chars();
         
-        // Don't include newline in column clamp
-        let max_col = if line_slice.to_string().ends_with("\r\n") {
-            line_chars.saturating_sub(2)
-        } else if line_slice.to_string().ends_with('\n') {
-            line_chars.saturating_sub(1)
+        // Don't include newline in column clamp (zero-allocation check)
+        let newline_chars = if line_chars > 0 && line_slice.char(line_chars - 1) == '\n' {
+            if line_chars > 1 && line_slice.char(line_chars - 2) == '\r' {
+                2
+            } else {
+                1
+            }
         } else {
-            line_chars
+            0
         };
+        let max_col = line_chars.saturating_sub(newline_chars);
 
         line_start + pos.column.min(max_col)
     }
@@ -246,6 +302,16 @@ impl TextBuffer {
             }
         }
         self.is_dirty = true;
+    }
+
+    /// Executes an entire transaction atomically, applying its operations to the buffer
+    /// and recording it into the undo history stack.
+    pub fn execute_transaction(&mut self, tx: Transaction) {
+        if tx.is_empty() {
+            return;
+        }
+        self.apply_transaction(&tx);
+        self.history.push(tx);
     }
 
     pub fn undo(&mut self) -> Option<Vec<Selection>> {

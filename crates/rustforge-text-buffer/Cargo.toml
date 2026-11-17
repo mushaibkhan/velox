@@ -9,3 +9,7 @@ rustforge-core.workspace = true
 ropey.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+
+[[bench]]
+name = "large_file"
+harness = false
