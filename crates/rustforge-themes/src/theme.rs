@@ -9,6 +9,7 @@ pub enum ThemeMode {
     MonokaiPro,
     LightModern,
     HighContrast,
+    PureObsidian,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +52,55 @@ pub struct Theme {
 }
 
 impl Theme {
+    pub fn pure_obsidian() -> Self {
+        Self {
+            mode: ThemeMode::PureObsidian,
+            name: "Pure Obsidian",
+            bg_app: Color32::from_rgb(14, 15, 18),
+            bg_editor: Color32::from_rgb(21, 22, 27),
+            bg_gutter: Color32::from_rgb(21, 22, 27),
+            bg_activity_bar: Color32::from_rgb(14, 15, 18),
+            bg_sidebar: Color32::from_rgb(18, 19, 23),
+            bg_tab_active: Color32::from_rgb(21, 22, 27),
+            bg_tab_inactive: Color32::from_rgb(14, 15, 18),
+            bg_status_bar: Color32::from_rgb(14, 15, 18),
+            bg_terminal: Color32::from_rgb(21, 22, 27),
+            bg_panel: Color32::from_rgb(28, 29, 36),
+            bg_input: Color32::from_rgb(28, 29, 36),
+
+            fg_primary: Color32::from_rgb(226, 232, 240),
+            fg_secondary: Color32::from_rgb(148, 163, 184),
+            fg_muted: Color32::from_rgb(100, 116, 139),
+            fg_accent: Color32::from_rgb(56, 189, 248),
+
+            border: Color32::from_rgb(30, 32, 38),
+            line_highlight: Color32::from_rgba_premultiplied(255, 255, 255, 8),
+            selection: Color32::from_rgba_premultiplied(56, 189, 248, 45),
+            find_match: Color32::from_rgba_premultiplied(234, 179, 8, 100),
+
+            syntax_keyword: Color32::from_rgb(244, 63, 94),     // #f43f5e
+            syntax_function: Color32::from_rgb(56, 189, 248),   // #38bdf8
+            syntax_type: Color32::from_rgb(167, 139, 250),      // #a78bfa
+            syntax_string: Color32::from_rgb(52, 211, 153),     // #34d399
+            syntax_number: Color32::from_rgb(251, 146, 60),     // #fb923c
+            syntax_comment: Color32::from_rgb(100, 116, 139),   // #64748b
+            syntax_operator: Color32::from_rgb(203, 213, 225),  // #cbd5e1
+            syntax_punctuation: Color32::from_rgb(148, 163, 184),// #94a3b8
+            syntax_variable: Color32::from_rgb(226, 232, 240),  // #e2e8f0
+            syntax_constant: Color32::from_rgb(244, 114, 182),  // #f472b6
+        }
+    }
+
+    pub fn from_mode(mode: ThemeMode) -> Self {
+        match mode {
+            ThemeMode::PureObsidian => Self::pure_obsidian(),
+            ThemeMode::DarkModern => Self::dark_modern(),
+            ThemeMode::TokyoNight => Self::tokyo_night(),
+            ThemeMode::MonokaiPro => Self::monokai_pro(),
+            _ => Self::pure_obsidian(),
+        }
+    }
+
     pub fn dark_modern() -> Self {
         Self {
             mode: ThemeMode::DarkModern,
@@ -182,5 +232,11 @@ impl Theme {
             TokenType::Constant => self.syntax_constant,
             TokenType::Text => self.fg_primary,
         }
+    }
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self::pure_obsidian()
     }
 }
