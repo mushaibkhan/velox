@@ -1,6 +1,7 @@
 use crate::app::RustForgeApp;
+use crate::ui::icons::Icon;
 use egui::{
-    pos2, vec2, Align2, FontId, Key, Rect, RichText, ScrollArea, Sense, Stroke,
+    pos2, vec2, Align2, Color32, FontId, Key, Rect, RichText, ScrollArea, Sense, Stroke,
     TextEdit, Ui,
 };
 use rustforge_editor::{
@@ -14,6 +15,7 @@ pub fn render_editor_area(app: &mut RustForgeApp, ui: &mut Ui) {
 
         if let Some(active_idx) = app.active_tab_idx {
             if active_idx < app.tabs.len() {
+                render_breadcrumbs(app, active_idx, ui);
                 if let Some(ref diff_state) = app.tabs[active_idx].diff_view {
                     crate::ui::diff_view::render_diff_view(
                         ui,
@@ -93,6 +95,52 @@ fn render_conflict_banner(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui
     }
 }
 
+fn render_breadcrumbs(app: &RustForgeApp, active_idx: usize, ui: &mut Ui) {
+    if let Some(tab) = app.tabs.get(active_idx) {
+        let frame = egui::Frame::none()
+            .fill(app.theme.bg_sidebar)
+            .stroke(Stroke::new(1.0_f32, app.theme.border))
+            .inner_margin(egui::Margin::symmetric(10.0, 3.0));
+
+        frame.show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+
+                let path_str = tab
+                    .path()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| tab.title.clone());
+
+                let parts: Vec<&str> = path_str.split('/').filter(|s| !s.is_empty()).collect();
+                let last_idx = parts.len().saturating_sub(1);
+
+                for (i, part) in parts.iter().enumerate() {
+                    let is_last = i == last_idx;
+                    if is_last {
+                        let icon = if part.ends_with(".rs") {
+                            Icon::FileRust
+                        } else if part.ends_with(".toml") {
+                            Icon::FileToml
+                        } else if part.ends_with(".md") {
+                            Icon::FileMarkdown
+                        } else {
+                            Icon::FileGeneric
+                        };
+                        let (icon_rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                        icon.paint(ui.painter(), icon_rect, app.theme.fg_accent);
+
+                        ui.label(RichText::new(*part).size(11.0).color(app.theme.fg_primary));
+                    } else {
+                        ui.label(RichText::new(*part).size(11.0).color(app.theme.fg_muted));
+                        let (sep_rect, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+                        Icon::ChevronRight.paint(ui.painter(), sep_rect, app.theme.fg_muted);
+                    }
+                }
+            });
+        });
+    }
+}
+
 fn render_tab_bar(app: &mut RustForgeApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
@@ -113,32 +161,84 @@ fn render_tab_bar(app: &mut RustForgeApp, ui: &mut Ui) {
                 app.theme.fg_secondary
             };
 
-            let dirty_mark = if tab.is_dirty() { " ●" } else { "" };
-            let conflict_mark = if tab.has_external_conflict { " ⚠" } else { "" };
-            let title_text = format!("{}{}{}", tab.title, dirty_mark, conflict_mark);
-
             let frame = egui::Frame::none()
                 .fill(bg_color)
+                .stroke(if is_active {
+                    Stroke::NONE
+                } else {
+                    Stroke::new(1.0_f32, app.theme.border)
+                })
                 .inner_margin(egui::Margin::symmetric(10.0, 6.0));
 
-            frame.show(ui, |ui| {
+            let frame_response = frame.show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    // File icon prefix
+                    let icon = if tab.title.ends_with(".rs") {
+                        Icon::FileRust
+                    } else if tab.title.ends_with(".toml") {
+                        Icon::FileToml
+                    } else if tab.title.ends_with(".md") {
+                        Icon::FileMarkdown
+                    } else {
+                        Icon::FileGeneric
+                    };
+                    let (icon_rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                    icon.paint(
+                        ui.painter(),
+                        icon_rect,
+                        if is_active {
+                            app.theme.fg_accent
+                        } else {
+                            app.theme.fg_muted
+                        },
+                    );
+
                     if ui
-                        .selectable_label(is_active, RichText::new(title_text).color(text_color).size(12.0))
+                        .selectable_label(is_active, RichText::new(&tab.title).color(text_color).size(12.0))
                         .clicked()
                     {
                         tab_to_switch = Some(idx);
                     }
 
-                    if ui
-                        .small_button("×")
-                        .on_hover_text("Close Tab")
-                        .clicked()
-                    {
+                    if tab.has_external_conflict {
+                        let (warn_rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                        Icon::DiagnosticWarning.paint(
+                            ui.painter(),
+                            warn_rect,
+                            Color32::from_rgb(245, 158, 11),
+                        );
+                    }
+
+                    // Interactive close / dirty icon
+                    let (close_rect, close_resp) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::click());
+                    let is_hovered = close_resp.hovered();
+
+                    if tab.is_dirty() && !is_hovered {
+                        Icon::UnsavedDot.paint(ui.painter(), close_rect, app.theme.fg_accent);
+                    } else {
+                        if is_hovered {
+                            ui.painter().rect_filled(close_rect, 3.0, Color32::from_rgb(38, 40, 51));
+                        }
+                        let close_color = if is_hovered {
+                            app.theme.fg_primary
+                        } else {
+                            app.theme.fg_muted
+                        };
+                        Icon::Close.paint(ui.painter(), close_rect.shrink(2.0), close_color);
+                    }
+
+                    if close_resp.on_hover_text("Close Tab").clicked() {
                         tab_to_close = Some(idx);
                     }
                 });
             });
+
+            // If active tab: draw 2px top accent line
+            if is_active {
+                let r = frame_response.response.rect;
+                let top_accent = Rect::from_min_max(r.min, pos2(r.max.x, r.min.y + 2.0));
+                ui.painter().rect_filled(top_accent, 0.0, app.theme.fg_accent);
+            }
         }
 
         if let Some(idx) = tab_to_switch {
@@ -151,6 +251,7 @@ fn render_tab_bar(app: &mut RustForgeApp, ui: &mut Ui) {
         }
     });
 }
+
 
 fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) {
     let font_size = app.settings.font_size;
