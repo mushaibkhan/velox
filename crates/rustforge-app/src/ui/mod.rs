@@ -1,6 +1,7 @@
 pub mod activity_bar;
 pub mod diff_view;
 pub mod editor_view;
+pub mod icons;
 pub mod menu_bar;
 pub mod palette;
 pub mod sidebar;
