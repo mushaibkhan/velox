@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.1] - 2026-11-17
+
+### Fixed
+- **Markdown / Symbol Infinite Loop Hang (`rustforge-syntax`)**:
+  - Resolved main UI thread freeze when opening `.md` files or lines containing `#` (headings or attributes).
+  - Added dedicated Markdown heading recognition in `SyntaxHighlighter`.
+  - Added guaranteed forward progress fallback in tokenizer loop ensuring `i` always advances on every iteration regardless of input characters, eliminating infinite loops on unhandled symbols.
+
 ## [0.2.0] - 2026-11-17
 
 ### Added (Milestone 2: Advanced Editing Engine & Syntax)
