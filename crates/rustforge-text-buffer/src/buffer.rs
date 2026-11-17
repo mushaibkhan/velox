@@ -173,6 +173,8 @@ impl TextBuffer {
     }
 
     /// Returns an iterator over `RopeSlice` for lines in the specified line range `[start_line, end_line)`.
+    ///
+    /// Note: Yielded `RopeSlice` elements retain trailing newline delimiters (`\n` or `\r\n`) per Ropey line slice conventions.
     pub fn lines_range(&self, start_line: usize, end_line: usize) -> impl Iterator<Item = RopeSlice<'_>> {
         let total_lines = self.line_count();
         let start = start_line.min(total_lines);
@@ -196,6 +198,8 @@ impl TextBuffer {
     }
 
     /// Slices up to `count` lines for a viewport starting at `start_line`.
+    ///
+    /// Note: Yielded `RopeSlice` elements retain trailing newline delimiters (`\n` or `\r\n`) per Ropey line slice conventions.
     pub fn viewport_lines(&self, start_line: usize, count: usize) -> Vec<RopeSlice<'_>> {
         let end_line = start_line.saturating_add(count);
         self.lines_range(start_line, end_line).collect()

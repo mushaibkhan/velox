@@ -49,6 +49,10 @@ impl Tab {
             let safe_cursor = rustforge_core::Selection::point(prev_cursor.head.min(max_char));
             new_editor.cursors = vec![safe_cursor];
             new_editor.primary_cursor_idx = 0;
+            new_editor.tab_size = self.editor.tab_size;
+            new_editor.show_find = self.editor.show_find;
+            new_editor.find_state = self.editor.find_state.clone();
+            new_editor.word_wrap = self.editor.word_wrap;
             self.editor = new_editor;
             self.has_external_conflict = false;
             self.update_title();
@@ -75,7 +79,11 @@ mod tests {
         fs::write(&file_path, "original content").unwrap();
 
         let buffer = TextBuffer::from_file(&file_path).unwrap();
-        let editor = EditorState::new(buffer);
+        let mut editor = EditorState::new(buffer);
+        editor.tab_size = 8;
+        editor.show_find = true;
+        editor.find_state.query = "original".to_string();
+        editor.word_wrap = true;
         let mut tab = Tab::new(editor);
         assert_eq!(tab.editor.buffer.slice_to_string(0, 8), "original");
         assert!(!tab.is_dirty());
@@ -89,6 +97,10 @@ mod tests {
         assert_eq!(tab.editor.buffer.slice_to_string(0, 7), "updated");
         assert!(!tab.is_dirty());
         assert!(!tab.has_external_conflict);
+        assert_eq!(tab.editor.tab_size, 8);
+        assert!(tab.editor.show_find);
+        assert_eq!(tab.editor.find_state.query, "original");
+        assert!(tab.editor.word_wrap);
 
         let _ = fs::remove_dir_all(&temp_dir);
     }

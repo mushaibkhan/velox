@@ -321,6 +321,9 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
 
                         let mut v_row_acc = 0;
                         for layout in &editor.cached_wrapped_layouts {
+                            if v_row_acc >= end_v_row {
+                                break;
+                            }
                             let line_idx = layout.line_index;
                             let layout_len = layout.rows.len().max(1);
 
