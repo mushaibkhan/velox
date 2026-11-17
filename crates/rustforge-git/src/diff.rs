@@ -110,10 +110,29 @@ impl FileDiff {
     /// Returns a map from 1-based line numbers in the new file to non-unchanged `LineChange`s.
     pub fn active_line_changes(&self) -> HashMap<usize, LineChange> {
         let mut map = HashMap::new();
-        for line_no in 1..=self.total_new_lines {
-            if let Some(change) = self.line_change_at(line_no) {
-                if change != LineChange::Unchanged {
-                    map.insert(line_no, change);
+        for hunk in &self.hunks {
+            for (idx, line) in hunk.lines.iter().enumerate() {
+                if let Some(new_no) = line.new_line_no {
+                    if line.change != LineChange::Unchanged {
+                        map.insert(new_no, line.change);
+                    } else {
+                        // 1. Preceded by Deleted line(s) in this hunk
+                        if idx > 0 && hunk.lines[idx - 1].change == LineChange::Deleted {
+                            map.entry(new_no).or_insert(LineChange::Deleted);
+                        }
+                        // 2. Trailing Deleted line(s) in this hunk with no following new line
+                        let following_new_in_hunk = hunk.lines[idx + 1..]
+                            .iter()
+                            .any(|l| l.new_line_no.is_some());
+                        if !following_new_in_hunk {
+                            let has_trailing_delete = hunk.lines[idx + 1..]
+                                .iter()
+                                .any(|l| l.change == LineChange::Deleted);
+                            if has_trailing_delete {
+                                map.entry(new_no).or_insert(LineChange::Deleted);
+                            }
+                        }
+                    }
                 }
             }
         }

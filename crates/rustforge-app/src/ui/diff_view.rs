@@ -49,8 +49,27 @@ pub fn render_diff_view(
     new_label: &str,
     side_by_side: bool,
 ) {
-    let mut sbs = side_by_side;
+    let id = ui.make_persistent_id("diff_view_side_by_side");
+    let mut sbs = ui.data_mut(|d| *d.get_temp_mut_or(id, side_by_side));
+    let prev_sbs = sbs;
     render_diff_view_impl(ui, theme, diff, old_label, new_label, Some(&mut sbs));
+    if sbs != prev_sbs {
+        ui.data_mut(|d| d.insert_temp(id, sbs));
+    }
+}
+
+/// Safely count character offset and length within a byte-indexed span without UTF-8 slicing.
+fn safe_char_count(s: &str, byte_start: usize, byte_end: usize) -> (usize, usize) {
+    let mut col_start = 0;
+    let mut col_len = 0;
+    for (byte_idx, _) in s.char_indices() {
+        if byte_idx < byte_start {
+            col_start += 1;
+        } else if byte_idx < byte_end {
+            col_len += 1;
+        }
+    }
+    (col_start, col_len)
 }
 
 fn diff_colors(change: LineChange, theme: &Theme) -> (Color32, Color32, Color32) {
@@ -283,10 +302,8 @@ fn render_unified_view(ui: &mut Ui, theme: &Theme, diff: &FileDiff) {
                         // Highlight inline character spans
                         for span in &line.inline_spans {
                             if span.start < clean_content.len() {
-                                let safe_start = span.start.min(clean_content.len());
-                                let safe_end = span.end.min(clean_content.len());
-                                let col_start = clean_content[..safe_start].chars().count();
-                                let col_len = clean_content[safe_start..safe_end].chars().count();
+                                let (col_start, col_len) =
+                                    safe_char_count(clean_content, span.start, span.end);
 
                                 let span_x = text_x + (col_start as f32 * char_width);
                                 let span_w = (col_len as f32 * char_width).max(char_width * 0.5);
@@ -532,10 +549,8 @@ fn render_diff_column_cell(
         // Inline span highlights
         for span in &line.inline_spans {
             if span.start < clean_content.len() {
-                let safe_start = span.start.min(clean_content.len());
-                let safe_end = span.end.min(clean_content.len());
-                let col_start = clean_content[..safe_start].chars().count();
-                let col_len = clean_content[safe_start..safe_end].chars().count();
+                let (col_start, col_len) =
+                    safe_char_count(clean_content, span.start, span.end);
 
                 let span_x = text_x + (col_start as f32 * metrics.char_width);
                 let span_w = (col_len as f32 * metrics.char_width).max(metrics.char_width * 0.5);
