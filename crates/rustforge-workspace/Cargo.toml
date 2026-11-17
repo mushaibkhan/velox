@@ -6,3 +6,10 @@ license.workspace = true
 
 [dependencies]
 walkdir.workspace = true
+notify = "6.1"
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+

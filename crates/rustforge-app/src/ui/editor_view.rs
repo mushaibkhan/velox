@@ -14,6 +14,9 @@ pub fn render_editor_area(app: &mut RustForgeApp, ui: &mut Ui) {
 
         if let Some(active_idx) = app.active_tab_idx {
             if active_idx < app.tabs.len() {
+                if app.tabs[active_idx].has_external_conflict {
+                    render_conflict_banner(app, active_idx, ui);
+                }
                 render_active_editor(app, active_idx, ui);
             } else {
                 render_empty_editor(app, ui);
@@ -22,6 +25,61 @@ pub fn render_editor_area(app: &mut RustForgeApp, ui: &mut Ui) {
             render_empty_editor(app, ui);
         }
     });
+}
+
+fn render_conflict_banner(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) {
+    let warning_bg = egui::Color32::from_rgb(52, 38, 16);
+    let warning_border = egui::Color32::from_rgb(190, 130, 30);
+    let frame = egui::Frame::none()
+        .fill(warning_bg)
+        .stroke(egui::Stroke::new(1.0_f32, warning_border))
+        .inner_margin(egui::Margin::symmetric(12.0, 6.0));
+
+    let mut action_reload = false;
+    let mut action_keep = false;
+
+    frame.show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("⚠ File has been modified on disk.")
+                    .color(egui::Color32::from_rgb(255, 195, 80))
+                    .strong()
+                    .size(12.0),
+            );
+
+            ui.add_space(8.0);
+
+            if ui
+                .button(
+                    RichText::new("Reload from Disk")
+                        .color(egui::Color32::WHITE)
+                        .size(12.0),
+                )
+                .on_hover_text("Discard editor changes and load latest disk contents")
+                .clicked()
+            {
+                action_reload = true;
+            }
+
+            if ui
+                .button(
+                    RichText::new("Keep Buffer Changes")
+                        .color(egui::Color32::WHITE)
+                        .size(12.0),
+                )
+                .on_hover_text("Ignore disk changes and retain current buffer contents")
+                .clicked()
+            {
+                action_keep = true;
+            }
+        });
+    });
+
+    if action_reload {
+        let _ = app.tabs[active_idx].reload_from_disk();
+    } else if action_keep {
+        app.tabs[active_idx].keep_buffer_changes();
+    }
 }
 
 fn render_tab_bar(app: &mut RustForgeApp, ui: &mut Ui) {
@@ -45,7 +103,8 @@ fn render_tab_bar(app: &mut RustForgeApp, ui: &mut Ui) {
             };
 
             let dirty_mark = if tab.is_dirty() { " ●" } else { "" };
-            let title_text = format!("{}{}", tab.title, dirty_mark);
+            let conflict_mark = if tab.has_external_conflict { " ⚠" } else { "" };
+            let title_text = format!("{}{}{}", tab.title, dirty_mark, conflict_mark);
 
             let frame = egui::Frame::none()
                 .fill(bg_color)

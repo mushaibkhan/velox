@@ -55,6 +55,11 @@ pub struct RustForgeApp {
     pub palette_query: String,
     pub palette_selected_idx: usize,
     pub commands: Vec<CommandItem>,
+
+    // File Watcher
+    pub file_watcher: Option<rustforge_workspace::FileWatcher>,
+    pub file_event_rx: Option<std::sync::mpsc::Receiver<rustforge_workspace::FileEvent>>,
+    pub egui_ctx: Option<egui::Context>,
 }
 
 impl RustForgeApp {
@@ -76,6 +81,8 @@ impl RustForgeApp {
         let mut commands = Vec::new();
         Self::register_commands(&mut commands);
 
+        let egui_ctx = Some(cc.egui_ctx.clone());
+
         let mut app = Self {
             theme,
             settings,
@@ -96,10 +103,16 @@ impl RustForgeApp {
             palette_query: String::new(),
             palette_selected_idx: 0,
             commands,
+            file_watcher: None,
+            file_event_rx: None,
+            egui_ctx,
         };
 
         // Try to start default terminal session with egui repaint callback
         app.new_terminal_session(Some(cc.egui_ctx.clone()));
+
+        // Start file watcher for initial workspace root if available
+        app.start_file_watcher();
 
         // Create an initial welcome/untitled file
         app.new_file();
@@ -262,6 +275,7 @@ impl RustForgeApp {
     pub fn open_folder_dialog(&mut self) {
         if let Some(folder) = rfd::FileDialog::new().pick_folder() {
             self.workspace.open(&folder);
+            self.start_file_watcher();
         }
     }
 
@@ -276,6 +290,7 @@ impl RustForgeApp {
             if let Some(tab) = self.tabs.get_mut(idx) {
                 if tab.path().is_some() {
                     let _ = tab.editor.buffer.save();
+                    tab.last_save_time = Some(std::time::Instant::now());
                     tab.update_title();
                 } else {
                     self.save_current_file_as();
@@ -289,6 +304,7 @@ impl RustForgeApp {
             if let Some(dest) = rfd::FileDialog::new().save_file() {
                 if let Some(tab) = self.tabs.get_mut(idx) {
                     let _ = tab.editor.buffer.save_as(&dest);
+                    tab.last_save_time = Some(std::time::Instant::now());
                     tab.update_title();
                 }
             }
@@ -407,6 +423,99 @@ impl RustForgeApp {
         }
     }
 
+    pub fn start_file_watcher(&mut self) {
+        if let Some(root) = self.workspace.root_path.clone() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut watcher = rustforge_workspace::FileWatcher::new();
+            let ctx = self.egui_ctx.clone();
+            let res = watcher.start_watching(&root, move |event| {
+                let _ = tx.send(event);
+                if let Some(c) = &ctx {
+                    c.request_repaint();
+                }
+            });
+            match res {
+                Ok(()) => {
+                    self.file_watcher = Some(watcher);
+                    self.file_event_rx = Some(rx);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to start file watcher on {}: {}", root.display(), e);
+                    self.file_watcher = None;
+                    self.file_event_rx = None;
+                }
+            }
+        } else {
+            self.file_watcher = None;
+            self.file_event_rx = None;
+        }
+    }
+
+    pub fn drain_file_events(&mut self) {
+        let mut events = Vec::new();
+        if let Some(rx) = &self.file_event_rx {
+            while let Ok(event) = rx.try_recv() {
+                events.push(event);
+            }
+        }
+
+        if events.is_empty() {
+            return;
+        }
+
+        let mut refresh_workspace = false;
+
+        for event in events {
+            match event {
+                rustforge_workspace::FileEvent::Created(_)
+                | rustforge_workspace::FileEvent::Deleted(_) => {
+                    refresh_workspace = true;
+                }
+                rustforge_workspace::FileEvent::Modified(_) => {}
+            }
+
+            let event_path = event.path();
+            for tab in &mut self.tabs {
+                let tab_path = tab.path().map(|p| p.to_path_buf());
+                if let Some(tab_path) = tab_path {
+                    if paths_match(&tab_path, event_path) {
+                        let is_recent_save = tab
+                            .last_save_time
+                            .is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(300));
+
+                        if is_recent_save {
+                            continue;
+                        }
+
+                        match &event {
+                            rustforge_workspace::FileEvent::Modified(_)
+                            | rustforge_workspace::FileEvent::Created(_) => {
+                                if !tab.editor.buffer.is_dirty() {
+                                    if let Err(e) = tab.reload_from_disk() {
+                                        tracing::warn!(
+                                            "Failed to reload modified file {:?}: {}",
+                                            tab_path,
+                                            e
+                                        );
+                                    }
+                                } else {
+                                    tab.has_external_conflict = true;
+                                }
+                            }
+                            rustforge_workspace::FileEvent::Deleted(_) => {
+                                tab.has_external_conflict = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if refresh_workspace {
+            self.workspace.refresh();
+        }
+    }
+
     fn handle_global_shortcuts(&mut self, ctx: &egui::Context) {
         let input = ctx.input(|i| i.clone());
 
@@ -450,8 +559,22 @@ impl RustForgeApp {
     }
 }
 
+fn paths_match(p1: &Path, p2: &Path) -> bool {
+    if p1 == p2 {
+        return true;
+    }
+    if let (Ok(c1), Ok(c2)) = (p1.canonicalize(), p2.canonicalize()) {
+        return c1 == c2;
+    }
+    false
+}
+
 impl eframe::App for RustForgeApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.egui_ctx.is_none() {
+            self.egui_ctx = Some(ctx.clone());
+        }
+        self.drain_file_events();
         self.handle_global_shortcuts(ctx);
 
         // 1. Top Menu Bar

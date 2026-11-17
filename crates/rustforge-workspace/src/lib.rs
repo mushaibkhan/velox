@@ -1,7 +1,9 @@
 pub mod tree;
+pub mod watcher;
 pub mod workspace;
 
 pub use tree::FileTreeNode;
+pub use watcher::{FileEvent, FileWatcher, WatcherError};
 pub use workspace::Workspace;
 
 #[cfg(test)]
