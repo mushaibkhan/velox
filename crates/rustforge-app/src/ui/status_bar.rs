@@ -6,11 +6,22 @@ pub fn render_status_bar(app: &RustForgeApp, ui: &mut Ui) {
         ui.spacing_mut().item_spacing.x = 14.0;
 
         // Git branch indicator
-        ui.label(
-            RichText::new("🌿 master")
-                .size(11.0)
-                .color(Color32::WHITE),
-        );
+        if app.git_repo.is_some() {
+            let (ahead, behind) = app.git_ahead_behind;
+            let sync_text = match (ahead, behind) {
+                (0, 0) => String::new(),
+                (a, 0) => format!(" ↑{}", a),
+                (0, b) => format!(" ↓{}", b),
+                (a, b) => format!(" ↑{} ↓{}", a, b),
+            };
+            let name = if app.git_branch.is_empty() { "HEAD" } else { &app.git_branch };
+            let branch_label = format!("🌿 {}{}", name, sync_text);
+            ui.label(
+                RichText::new(branch_label)
+                    .size(11.0)
+                    .color(Color32::WHITE),
+            );
+        }
 
         if let Some(active_idx) = app.active_tab_idx {
             if let Some(tab) = app.tabs.get(active_idx) {

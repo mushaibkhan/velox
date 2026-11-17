@@ -138,4 +138,24 @@ impl TerminalSession {
     pub fn is_alive(&self) -> bool {
         self.is_alive.load(Ordering::Relaxed)
     }
+
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = title.into();
+        self
+    }
+
+    pub fn display_title(&self) -> &str {
+        Path::new(&self.title)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&self.title)
+    }
+
+    pub fn terminate(&mut self) {
+        self.is_alive.store(false, Ordering::Relaxed);
+    }
+
+    pub fn set_alive(&self, alive: bool) {
+        self.is_alive.store(alive, Ordering::Relaxed);
+    }
 }

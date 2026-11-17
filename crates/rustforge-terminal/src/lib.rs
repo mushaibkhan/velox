@@ -1,8 +1,10 @@
 pub mod grid;
+pub mod manager;
 pub mod parser;
 pub mod session;
 
 pub use grid::{Cell, Color, TerminalGrid};
+pub use manager::{SplitMode, TerminalManager};
 pub use session::TerminalSession;
 
 #[cfg(test)]

@@ -8,4 +8,7 @@ license.workspace = true
 rustforge-core.workspace = true
 rustforge-text-buffer.workspace = true
 rustforge-syntax.workspace = true
+rustforge-git.workspace = true
+rustforge-language-server = { workspace = true }
+lsp-types = { workspace = true }
 regex.workspace = true

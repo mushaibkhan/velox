@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+name = "rustforge_app"
+path = "src/lib.rs"
+
 [[bin]]
 name = "rustforge"
 path = "src/main.rs"
@@ -18,7 +22,10 @@ rustforge-workspace.workspace = true
 rustforge-themes.workspace = true
 rustforge-settings.workspace = true
 rustforge-search.workspace = true
+rustforge-git.workspace = true
+rustforge-language-server = { workspace = true }
 
+git2 = { version = "0.20", default-features = false }
 eframe.workspace = true
 egui.workspace = true
 tracing.workspace = true
@@ -26,3 +33,9 @@ tracing-subscriber.workspace = true
 rfd.workspace = true
 parking_lot.workspace = true
 serde.workspace = true
+lsp-types = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+serde_json.workspace = true
