@@ -1,6 +1,7 @@
 use crate::cursor::{normalize_selections, Direction};
 use crate::find::FindState;
 use crate::minimap::{MinimapLine, MinimapState, MinimapThumb};
+use crate::wrap::{wrap_line, WrappedLineLayout};
 use rustforge_core::{Position, Selection};
 use rustforge_syntax::{Language, SyntaxHighlighter, TokenSpan};
 use rustforge_text_buffer::TextBuffer;
@@ -17,6 +18,7 @@ pub struct EditorState {
     pub visible_lines: usize,
     pub tab_size: usize,
     pub minimap: MinimapState,
+    pub word_wrap: bool,
 }
 
 impl EditorState {
@@ -42,6 +44,7 @@ impl EditorState {
             visible_lines: 40,
             tab_size: 4,
             minimap,
+            word_wrap: false,
         }
     }
 
@@ -289,5 +292,21 @@ impl EditorState {
         let target_line = self.minimap_y_to_line(minimap_y, height);
         let max_scroll = self.buffer.line_count().saturating_sub(self.visible_lines);
         self.scroll_line = target_line.saturating_sub(self.visible_lines / 2).min(max_scroll);
+    }
+
+    // Word wrap helpers
+    #[allow(clippy::single_range_in_vec_init)]
+    pub fn compute_wrapped_layouts(&self, max_chars_per_row: usize) -> Vec<WrappedLineLayout> {
+        let count = self.buffer.line_count();
+        let mut layouts = Vec::with_capacity(count);
+        for line_idx in 0..count {
+            if let Some(line_str) = self.buffer.line_to_string(line_idx) {
+                let rows = wrap_line(&line_str, max_chars_per_row);
+                layouts.push(WrappedLineLayout::new(line_idx, rows));
+            } else {
+                layouts.push(WrappedLineLayout::new(line_idx, vec![0..0]));
+            }
+        }
+        layouts
     }
 }

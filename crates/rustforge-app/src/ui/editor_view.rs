@@ -3,7 +3,10 @@ use egui::{
     pos2, vec2, Align2, FontId, Key, Rect, RichText, ScrollArea, Sense, Stroke,
     TextEdit, Ui,
 };
-use rustforge_editor::{click_to_scroll_line, thumb_y_to_scroll_line, Direction};
+use rustforge_editor::{
+    buffer_pos_to_visual_row, click_to_scroll_line, thumb_y_to_scroll_line,
+    visual_row_to_buffer_pos, Direction,
+};
 
 pub fn render_editor_area(app: &mut RustForgeApp, ui: &mut Ui) {
     ui.vertical(|ui| {
@@ -167,6 +170,23 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
     let editor_width = (ui.available_width() - minimap_width).max(80.0);
     let is_minimap_dragging = editor.minimap.is_dragging;
 
+    // Synchronize word wrap setting with editor state
+    editor.word_wrap = app.settings.word_wrap;
+
+    // Word wrap layouts if enabled
+    let content_width = (editor_width - gutter_width - 16.0).max(10.0);
+    let max_chars_per_row = ((content_width / char_width).floor() as usize).max(10);
+    let wrapped_layouts = if editor.word_wrap {
+        editor.compute_wrapped_layouts(max_chars_per_row)
+    } else {
+        Vec::new()
+    };
+    let total_visual_rows: usize = if editor.word_wrap {
+        wrapped_layouts.iter().map(|l| l.rows.len().max(1)).sum()
+    } else {
+        total_lines
+    };
+
     // Consume any pending scroll request from minimap interaction
     let minimap_target = editor.minimap.scroll_target.take();
     let has_scroll_target = minimap_target.is_some();
@@ -190,8 +210,9 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
                 }
 
                 scroll_area.show(ui, |ui| {
+                    let canvas_height = (total_visual_rows as f32 * line_height).max(available_height);
                     let (rect, response) = ui.allocate_exact_size(
-                        vec2(ui.available_width(), (total_lines as f32 * line_height).max(available_height)),
+                        vec2(ui.available_width(), canvas_height),
                         Sense::click_and_drag(),
                     );
 
@@ -209,104 +230,231 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
                     );
 
                     // Active line highlight
-                    let active_line_y = rect.min.y + (primary_pos.line as f32 * line_height);
+                    let (cur_cursor_v_row, cur_cursor_v_col) = if editor.word_wrap {
+                        buffer_pos_to_visual_row(primary_pos, &wrapped_layouts)
+                    } else {
+                        (primary_pos.line, primary_pos.column)
+                    };
+
+                    let active_line_y = rect.min.y + (cur_cursor_v_row as f32 * line_height);
                     let active_line_rect = Rect::from_min_size(
                         pos2(rect.min.x + gutter_width, active_line_y),
                         vec2(rect.width() - gutter_width, line_height),
                     );
                     painter.rect_filled(active_line_rect, 0.0, theme.line_highlight);
 
-                    // Viewport lines only
-                    let start_line = ((ui.clip_rect().min.y - rect.min.y) / line_height).floor().max(0.0) as usize;
-                    let end_line = ((ui.clip_rect().max.y - rect.min.y) / line_height).ceil() as usize;
-                    let end_line = end_line.min(total_lines);
+                    if editor.word_wrap {
+                        let start_v_row = ((ui.clip_rect().min.y - rect.min.y) / line_height).floor().max(0.0) as usize;
+                        let end_v_row = ((ui.clip_rect().max.y - rect.min.y) / line_height).ceil() as usize;
+                        let end_v_row = end_v_row.min(total_visual_rows);
 
-                    if !is_minimap_dragging && !has_scroll_target {
-                        editor.scroll_line = start_line;
-                    }
-
-                    for line_idx in start_line..end_line {
-                        let line_y = rect.min.y + (line_idx as f32 * line_height);
-
-                        // 1. Line numbers
-                        if show_line_numbers {
-                            let num_str = format!("{:>width$}", line_idx + 1, width = gutter_digits);
-                            let num_color = if line_idx == primary_pos.line {
-                                theme.fg_primary
-                            } else {
-                                theme.fg_muted
-                            };
-                            painter.text(
-                                pos2(rect.min.x + 8.0, line_y + 1.0),
-                                Align2::LEFT_TOP,
-                                num_str,
-                                font_id.clone(),
-                                num_color,
-                            );
+                        if !is_minimap_dragging && !has_scroll_target {
+                            let top_pos = visual_row_to_buffer_pos(start_v_row, 0, &wrapped_layouts);
+                            editor.scroll_line = top_pos.line;
                         }
 
-                        // 2. Syntax-highlighted text tokens
-                        let tokens = editor.highlight_line(line_idx);
-                        let line_start_char = editor.buffer.line_to_char(line_idx);
+                        let mut v_row_acc = 0;
+                        for layout in &wrapped_layouts {
+                            let line_idx = layout.line_index;
+                            let layout_len = layout.rows.len().max(1);
 
-                        if let Some(line_str) = editor.buffer.line_to_string(line_idx) {
-                            let clean_line = line_str.trim_end_matches(['\r', '\n']);
+                            if v_row_acc + layout_len > start_v_row && v_row_acc < end_v_row {
+                                let tokens = editor.highlight_line(line_idx);
+                                let line_start_char = editor.buffer.line_to_char(line_idx);
+                                let clean_line_opt = editor.buffer.line_to_string(line_idx);
+                                let clean_line = clean_line_opt.as_deref().map(|s| s.trim_end_matches(['\r', '\n'])).unwrap_or("");
 
-                            for token in tokens {
-                                let token_start_in_line = token.start.saturating_sub(line_start_char);
-                                let token_end_in_line = token.end.saturating_sub(line_start_char).min(clean_line.chars().count());
+                                for (sub_idx, row_range) in layout.rows.iter().enumerate() {
+                                    let v_row = v_row_acc + sub_idx;
+                                    if v_row >= start_v_row && v_row < end_v_row {
+                                        let row_y = rect.min.y + (v_row as f32 * line_height);
 
-                                if token_start_in_line < token_end_in_line {
-                                    let text_segment: String = clean_line
-                                        .chars()
-                                        .skip(token_start_in_line)
-                                        .take(token_end_in_line - token_start_in_line)
-                                        .collect();
+                                        // 1. Line numbers and soft continuation marker
+                                        if show_line_numbers {
+                                            if sub_idx == 0 {
+                                                let num_str = format!("{:>width$}", line_idx + 1, width = gutter_digits);
+                                                let num_color = if line_idx == primary_pos.line {
+                                                    theme.fg_primary
+                                                } else {
+                                                    theme.fg_muted
+                                                };
+                                                painter.text(
+                                                    pos2(rect.min.x + 8.0, row_y + 1.0),
+                                                    Align2::LEFT_TOP,
+                                                    num_str,
+                                                    font_id.clone(),
+                                                    num_color,
+                                                );
+                                            } else {
+                                                let marker_str = format!("{:>width$}", "·", width = gutter_digits);
+                                                painter.text(
+                                                    pos2(rect.min.x + 8.0, row_y + 1.0),
+                                                    Align2::LEFT_TOP,
+                                                    marker_str,
+                                                    font_id.clone(),
+                                                    theme.fg_muted,
+                                                );
+                                            }
+                                        }
 
-                                    let token_x = rect.min.x + gutter_width + 8.0 + (token_start_in_line as f32 * char_width);
-                                    let color = theme.get_token_color(token.token_type);
+                                        // 2. Syntax-highlighted text tokens in this sub-row
+                                        for token in &tokens {
+                                            let token_start_in_line = token.start.saturating_sub(line_start_char);
+                                            let token_end_in_line = token.end.saturating_sub(line_start_char).min(clean_line.chars().count());
 
-                                    painter.text(
-                                        pos2(token_x, line_y + 1.0),
-                                        Align2::LEFT_TOP,
-                                        text_segment,
-                                        font_id.clone(),
-                                        color,
-                                    );
-                                }
-                            }
+                                            let seg_start = token_start_in_line.max(row_range.start);
+                                            let seg_end = token_end_in_line.min(row_range.end);
+                                            if seg_start < seg_end {
+                                                let text_segment: String = clean_line
+                                                    .chars()
+                                                    .skip(seg_start)
+                                                    .take(seg_end - seg_start)
+                                                    .collect();
 
-                            // 3. Selection highlight for this line
-                            for cursor in &editor.cursors {
-                                if !cursor.is_empty() {
-                                    let sel_start = cursor.start();
-                                    let sel_end = cursor.end();
-                                    let line_end_char = line_start_char + clean_line.chars().count();
+                                                let col_offset = seg_start - row_range.start;
+                                                let token_x = rect.min.x + gutter_width + 8.0 + (col_offset as f32 * char_width);
+                                                let color = theme.get_token_color(token.token_type);
 
-                                    if sel_end > line_start_char && sel_start < line_end_char {
-                                        let line_sel_start = sel_start.max(line_start_char).saturating_sub(line_start_char);
-                                        let line_sel_end = sel_end.min(line_end_char).saturating_sub(line_start_char);
+                                                painter.text(
+                                                    pos2(token_x, row_y + 1.0),
+                                                    Align2::LEFT_TOP,
+                                                    text_segment,
+                                                    font_id.clone(),
+                                                    color,
+                                                );
+                                            }
+                                        }
 
-                                        let sel_x = rect.min.x + gutter_width + 8.0 + (line_sel_start as f32 * char_width);
-                                        let sel_w = (line_sel_end - line_sel_start) as f32 * char_width;
+                                        // 3. Selection highlight for this sub-row
+                                        for cursor in &editor.cursors {
+                                            if !cursor.is_empty() {
+                                                let sel_start = cursor.start();
+                                                let sel_end = cursor.end();
+                                                let row_start_char = line_start_char + row_range.start;
+                                                let row_end_char = line_start_char + row_range.end;
 
-                                        let sel_rect = Rect::from_min_size(
-                                            pos2(sel_x, line_y),
-                                            vec2(sel_w, line_height),
-                                        );
-                                        painter.rect_filled(sel_rect, 0.0, theme.selection);
+                                                if sel_end > row_start_char && sel_start < row_end_char {
+                                                    let sub_sel_start = sel_start.max(row_start_char) - row_start_char;
+                                                    let sub_sel_end = sel_end.min(row_end_char) - row_start_char;
+
+                                                    let sel_x = rect.min.x + gutter_width + 8.0 + (sub_sel_start as f32 * char_width);
+                                                    let sel_w = (sub_sel_end - sub_sel_start) as f32 * char_width;
+
+                                                    let sel_rect = Rect::from_min_size(
+                                                        pos2(sel_x, row_y),
+                                                        vec2(sel_w, line_height),
+                                                    );
+                                                    painter.rect_filled(sel_rect, 0.0, theme.selection);
+                                                }
+                                            }
+                                        }
+
+                                        // 4. Cursor rendering
+                                        if v_row == cur_cursor_v_row {
+                                            let cursor_x = rect.min.x + gutter_width + 8.0 + (cur_cursor_v_col as f32 * char_width);
+                                            painter.line_segment(
+                                                [pos2(cursor_x, row_y), pos2(cursor_x, row_y + line_height - 1.0)],
+                                                Stroke::new(2.0_f32, theme.fg_primary),
+                                            );
+                                        }
                                     }
                                 }
                             }
+                            v_row_acc += layout_len;
+                        }
+                    } else {
+                        // Viewport lines only (unwrapped)
+                        let start_line = ((ui.clip_rect().min.y - rect.min.y) / line_height).floor().max(0.0) as usize;
+                        let end_line = ((ui.clip_rect().max.y - rect.min.y) / line_height).ceil() as usize;
+                        let end_line = end_line.min(total_lines);
+
+                        if !is_minimap_dragging && !has_scroll_target {
+                            editor.scroll_line = start_line;
                         }
 
-                        // 4. Cursor rendering
-                        if line_idx == primary_pos.line {
-                            let cursor_x = rect.min.x + gutter_width + 8.0 + (primary_pos.column as f32 * char_width);
-                            painter.line_segment(
-                                [pos2(cursor_x, line_y), pos2(cursor_x, line_y + line_height - 1.0)],
-                                Stroke::new(2.0_f32, theme.fg_primary),
-                            );
+                        for line_idx in start_line..end_line {
+                            let line_y = rect.min.y + (line_idx as f32 * line_height);
+
+                            // 1. Line numbers
+                            if show_line_numbers {
+                                let num_str = format!("{:>width$}", line_idx + 1, width = gutter_digits);
+                                let num_color = if line_idx == primary_pos.line {
+                                    theme.fg_primary
+                                } else {
+                                    theme.fg_muted
+                                };
+                                painter.text(
+                                    pos2(rect.min.x + 8.0, line_y + 1.0),
+                                    Align2::LEFT_TOP,
+                                    num_str,
+                                    font_id.clone(),
+                                    num_color,
+                                );
+                            }
+
+                            // 2. Syntax-highlighted text tokens
+                            let tokens = editor.highlight_line(line_idx);
+                            let line_start_char = editor.buffer.line_to_char(line_idx);
+
+                            if let Some(line_str) = editor.buffer.line_to_string(line_idx) {
+                                let clean_line = line_str.trim_end_matches(['\r', '\n']);
+
+                                for token in tokens {
+                                    let token_start_in_line = token.start.saturating_sub(line_start_char);
+                                    let token_end_in_line = token.end.saturating_sub(line_start_char).min(clean_line.chars().count());
+
+                                    if token_start_in_line < token_end_in_line {
+                                        let text_segment: String = clean_line
+                                            .chars()
+                                            .skip(token_start_in_line)
+                                            .take(token_end_in_line - token_start_in_line)
+                                            .collect();
+
+                                        let token_x = rect.min.x + gutter_width + 8.0 + (token_start_in_line as f32 * char_width);
+                                        let color = theme.get_token_color(token.token_type);
+
+                                        painter.text(
+                                            pos2(token_x, line_y + 1.0),
+                                            Align2::LEFT_TOP,
+                                            text_segment,
+                                            font_id.clone(),
+                                            color,
+                                        );
+                                    }
+                                }
+
+                                // 3. Selection highlight for this line
+                                for cursor in &editor.cursors {
+                                    if !cursor.is_empty() {
+                                        let sel_start = cursor.start();
+                                        let sel_end = cursor.end();
+                                        let line_end_char = line_start_char + clean_line.chars().count();
+
+                                        if sel_end > line_start_char && sel_start < line_end_char {
+                                            let line_sel_start = sel_start.max(line_start_char).saturating_sub(line_start_char);
+                                            let line_sel_end = sel_end.min(line_end_char).saturating_sub(line_start_char);
+
+                                            let sel_x = rect.min.x + gutter_width + 8.0 + (line_sel_start as f32 * char_width);
+                                            let sel_w = (line_sel_end - line_sel_start) as f32 * char_width;
+
+                                            let sel_rect = Rect::from_min_size(
+                                                pos2(sel_x, line_y),
+                                                vec2(sel_w, line_height),
+                                            );
+                                            painter.rect_filled(sel_rect, 0.0, theme.selection);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 4. Cursor rendering
+                            if line_idx == primary_pos.line {
+                                let cursor_x = rect.min.x + gutter_width + 8.0 + (primary_pos.column as f32 * char_width);
+                                painter.line_segment(
+                                    [pos2(cursor_x, line_y), pos2(cursor_x, line_y + line_height - 1.0)],
+                                    Stroke::new(2.0_f32, theme.fg_primary),
+                                );
+                            }
                         }
                     }
 
@@ -314,13 +462,24 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
                     if response.clicked() {
                         set_editor_focus = true;
                         if let Some(mouse_pos) = response.interact_pointer_pos() {
-                            let clicked_line = ((mouse_pos.y - rect.min.y) / line_height).floor().max(0.0) as usize;
-                            let clicked_line = clicked_line.min(total_lines.saturating_sub(1));
-                            let clicked_col = ((mouse_pos.x - (rect.min.x + gutter_width + 8.0)) / char_width).round().max(0.0) as usize;
+                            if editor.word_wrap {
+                                let clicked_v_row = ((mouse_pos.y - rect.min.y) / line_height).floor().max(0.0) as usize;
+                                let clicked_v_row = clicked_v_row.min(total_visual_rows.saturating_sub(1));
+                                let clicked_col = ((mouse_pos.x - (rect.min.x + gutter_width + 8.0)) / char_width).round().max(0.0) as usize;
 
-                            let char_offset = editor.buffer.position_to_char(rustforge_core::Position::new(clicked_line, clicked_col));
-                            editor.cursors = vec![rustforge_core::Selection::point(char_offset)];
-                            editor.primary_cursor_idx = 0;
+                                let buf_pos = visual_row_to_buffer_pos(clicked_v_row, clicked_col, &wrapped_layouts);
+                                let char_offset = editor.buffer.position_to_char(buf_pos);
+                                editor.cursors = vec![rustforge_core::Selection::point(char_offset)];
+                                editor.primary_cursor_idx = 0;
+                            } else {
+                                let clicked_line = ((mouse_pos.y - rect.min.y) / line_height).floor().max(0.0) as usize;
+                                let clicked_line = clicked_line.min(total_lines.saturating_sub(1));
+                                let clicked_col = ((mouse_pos.x - (rect.min.x + gutter_width + 8.0)) / char_width).round().max(0.0) as usize;
+
+                                let char_offset = editor.buffer.position_to_char(rustforge_core::Position::new(clicked_line, clicked_col));
+                                editor.cursors = vec![rustforge_core::Selection::point(char_offset)];
+                                editor.primary_cursor_idx = 0;
+                            }
                         }
                     }
                 });

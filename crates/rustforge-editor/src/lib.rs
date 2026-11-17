@@ -2,6 +2,7 @@ pub mod cursor;
 pub mod find;
 pub mod minimap;
 pub mod state;
+pub mod wrap;
 
 pub use cursor::{normalize_selections, Direction};
 pub use find::FindState;
@@ -11,6 +12,9 @@ pub use minimap::{
     thumb_y_to_scroll_line, MinimapLine, MinimapState, MinimapThumb,
 };
 pub use state::EditorState;
+pub use wrap::{
+    buffer_pos_to_visual_row, visual_row_to_buffer_pos, wrap_line, WrappedLineLayout,
+};
 
 #[cfg(test)]
 mod tests {
