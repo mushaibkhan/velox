@@ -106,7 +106,7 @@ pub fn render_menu_bar(app: &mut RustForgeApp, ui: &mut Ui) {
                 ui.close_menu();
             }
             if ui.button("Clear Terminal").clicked() {
-                if let Some(term) = &mut app.terminal {
+                if let Some(term) = app.terminal_mut() {
                     term.grid.write().clear_screen();
                 }
                 ui.close_menu();

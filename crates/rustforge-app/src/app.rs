@@ -9,7 +9,7 @@ use rustforge_core::{Action, CommandItem};
 use rustforge_editor::EditorState;
 use rustforge_search::{SearchEngine, SearchMatch};
 use rustforge_settings::Settings;
-use rustforge_terminal::TerminalSession;
+use rustforge_terminal::{TerminalManager, TerminalSession};
 use rustforge_text_buffer::TextBuffer;
 use rustforge_themes::{Theme, ThemeMode};
 use rustforge_workspace::Workspace;
@@ -37,7 +37,8 @@ pub struct RustForgeApp {
     pub workspace: Workspace,
     pub tabs: Vec<Tab>,
     pub active_tab_idx: Option<usize>,
-    pub terminal: Option<TerminalSession>,
+    pub terminal_manager: TerminalManager,
+    pub focused_terminal_idx: Option<usize>,
     pub active_sidebar: SidebarTab,
     pub sidebar_visible: bool,
     pub terminal_visible: bool,
@@ -100,7 +101,8 @@ impl RustForgeApp {
             workspace,
             tabs: Vec::new(),
             active_tab_idx: None,
-            terminal: None,
+            terminal_manager: TerminalManager::new(),
+            focused_terminal_idx: None,
             active_sidebar: SidebarTab::Explorer,
             sidebar_visible: true,
             terminal_visible: true,
@@ -154,7 +156,8 @@ impl RustForgeApp {
             workspace,
             tabs: Vec::new(),
             active_tab_idx: None,
-            terminal: None,
+            terminal_manager: TerminalManager::new(),
+            focused_terminal_idx: None,
             active_sidebar: SidebarTab::Explorer,
             sidebar_visible: true,
             terminal_visible: false,
@@ -630,9 +633,29 @@ impl RustForgeApp {
             cb
         });
         match TerminalSession::spawn(80, 24, cwd, repaint_cb) {
-            Ok(session) => self.terminal = Some(session),
+            Ok(session) => {
+                let idx = self.terminal_manager.add_session(session);
+                self.focused_terminal_idx = Some(idx);
+            }
             Err(e) => tracing::warn!("Failed to spawn terminal session: {}", e),
         }
+    }
+
+    pub fn close_terminal_session(&mut self, idx: usize) {
+        let _ = self.terminal_manager.close_session(idx);
+        if self.terminal_manager.is_empty() {
+            self.focused_terminal_idx = None;
+        } else {
+            self.focused_terminal_idx = Some(self.terminal_manager.active_idx());
+        }
+    }
+
+    pub fn terminal(&self) -> Option<&TerminalSession> {
+        self.terminal_manager.active_session()
+    }
+
+    pub fn terminal_mut(&mut self) -> Option<&mut TerminalSession> {
+        self.terminal_manager.active_session_mut()
     }
 
     pub fn execute_workspace_search(&mut self) {
