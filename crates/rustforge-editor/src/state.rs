@@ -19,6 +19,9 @@ pub struct EditorState {
     pub tab_size: usize,
     pub minimap: MinimapState,
     pub word_wrap: bool,
+    pub cached_wrapped_layouts: Vec<WrappedLineLayout>,
+    pub cached_wrap_cols: usize,
+    pub wrap_dirty: bool,
 }
 
 impl EditorState {
@@ -45,6 +48,9 @@ impl EditorState {
             tab_size: 4,
             minimap,
             word_wrap: false,
+            cached_wrapped_layouts: Vec::new(),
+            cached_wrap_cols: 0,
+            wrap_dirty: true,
         }
     }
 
@@ -100,6 +106,7 @@ impl EditorState {
         normalize_selections(&mut new_cursors);
         self.cursors = new_cursors;
         self.primary_cursor_idx = 0;
+        self.wrap_dirty = true;
         self.update_minimap();
     }
 
@@ -131,6 +138,7 @@ impl EditorState {
         normalize_selections(&mut new_cursors);
         self.cursors = new_cursors;
         self.primary_cursor_idx = 0;
+        self.wrap_dirty = true;
         self.update_minimap();
     }
 
@@ -157,6 +165,7 @@ impl EditorState {
         normalize_selections(&mut new_cursors);
         self.cursors = new_cursors;
         self.primary_cursor_idx = 0;
+        self.wrap_dirty = true;
         self.update_minimap();
     }
 
@@ -244,6 +253,7 @@ impl EditorState {
         if let Some(cursors) = self.buffer.undo() {
             self.cursors = cursors;
             self.primary_cursor_idx = 0;
+            self.wrap_dirty = true;
             self.update_minimap();
         }
     }
@@ -252,6 +262,7 @@ impl EditorState {
         if let Some(cursors) = self.buffer.redo() {
             self.cursors = cursors;
             self.primary_cursor_idx = 0;
+            self.wrap_dirty = true;
             self.update_minimap();
         }
     }
@@ -295,6 +306,23 @@ impl EditorState {
     }
 
     // Word wrap helpers
+    pub fn invalidate_wrap_cache(&mut self) {
+        self.wrap_dirty = true;
+    }
+
+    pub fn update_wrapped_layouts(&mut self, max_chars_per_row: usize) -> &[WrappedLineLayout] {
+        if self.wrap_dirty || self.cached_wrap_cols != max_chars_per_row {
+            self.cached_wrapped_layouts = self.compute_wrapped_layouts(max_chars_per_row);
+            self.cached_wrap_cols = max_chars_per_row;
+            self.wrap_dirty = false;
+        }
+        &self.cached_wrapped_layouts
+    }
+
+    pub fn wrapped_layouts(&self) -> &[WrappedLineLayout] {
+        &self.cached_wrapped_layouts
+    }
+
     #[allow(clippy::single_range_in_vec_init)]
     pub fn compute_wrapped_layouts(&self, max_chars_per_row: usize) -> Vec<WrappedLineLayout> {
         let count = self.buffer.line_count();

@@ -173,16 +173,14 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
     // Synchronize word wrap setting with editor state
     editor.word_wrap = app.settings.word_wrap;
 
-    // Word wrap layouts if enabled
+    // Word wrap layouts if enabled (cached in EditorState)
     let content_width = (editor_width - gutter_width - 16.0).max(10.0);
     let max_chars_per_row = ((content_width / char_width).floor() as usize).max(10);
-    let wrapped_layouts = if editor.word_wrap {
-        editor.compute_wrapped_layouts(max_chars_per_row)
-    } else {
-        Vec::new()
-    };
+    if editor.word_wrap {
+        editor.update_wrapped_layouts(max_chars_per_row);
+    }
     let total_visual_rows: usize = if editor.word_wrap {
-        wrapped_layouts.iter().map(|l| l.rows.len().max(1)).sum()
+        editor.cached_wrapped_layouts.iter().map(|l| l.rows.len().max(1)).sum()
     } else {
         total_lines
     };
@@ -206,7 +204,16 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
                     .auto_shrink([false, false]);
 
                 if is_minimap_dragging || nav_key_pressed || has_scroll_target {
-                    scroll_area = scroll_area.vertical_scroll_offset(editor.scroll_line as f32 * line_height);
+                    let scroll_v_row = if editor.word_wrap {
+                        buffer_pos_to_visual_row(
+                            rustforge_core::Position::new(editor.scroll_line, 0),
+                            &editor.cached_wrapped_layouts,
+                        )
+                        .0
+                    } else {
+                        editor.scroll_line
+                    };
+                    scroll_area = scroll_area.vertical_scroll_offset(scroll_v_row as f32 * line_height);
                 }
 
                 scroll_area.show(ui, |ui| {
@@ -231,7 +238,7 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
 
                     // Active line highlight
                     let (cur_cursor_v_row, cur_cursor_v_col) = if editor.word_wrap {
-                        buffer_pos_to_visual_row(primary_pos, &wrapped_layouts)
+                        buffer_pos_to_visual_row(primary_pos, &editor.cached_wrapped_layouts)
                     } else {
                         (primary_pos.line, primary_pos.column)
                     };
@@ -249,12 +256,12 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
                         let end_v_row = end_v_row.min(total_visual_rows);
 
                         if !is_minimap_dragging && !has_scroll_target {
-                            let top_pos = visual_row_to_buffer_pos(start_v_row, 0, &wrapped_layouts);
+                            let top_pos = visual_row_to_buffer_pos(start_v_row, 0, &editor.cached_wrapped_layouts);
                             editor.scroll_line = top_pos.line;
                         }
 
                         let mut v_row_acc = 0;
-                        for layout in &wrapped_layouts {
+                        for layout in &editor.cached_wrapped_layouts {
                             let line_idx = layout.line_index;
                             let layout_len = layout.rows.len().max(1);
 
@@ -467,7 +474,7 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
                                 let clicked_v_row = clicked_v_row.min(total_visual_rows.saturating_sub(1));
                                 let clicked_col = ((mouse_pos.x - (rect.min.x + gutter_width + 8.0)) / char_width).round().max(0.0) as usize;
 
-                                let buf_pos = visual_row_to_buffer_pos(clicked_v_row, clicked_col, &wrapped_layouts);
+                                let buf_pos = visual_row_to_buffer_pos(clicked_v_row, clicked_col, &editor.cached_wrapped_layouts);
                                 let char_offset = editor.buffer.position_to_char(buf_pos);
                                 editor.cursors = vec![rustforge_core::Selection::point(char_offset)];
                                 editor.primary_cursor_idx = 0;

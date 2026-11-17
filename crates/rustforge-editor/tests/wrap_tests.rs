@@ -135,3 +135,82 @@ fn test_editor_state_word_wrap_integration() {
     assert!(layouts[0].row_count() > 1);
     assert_eq!(layouts[1].row_count(), 1);
 }
+
+#[test]
+fn test_regression_whitespace_gap_cursor_mapping() {
+    // "hello   world" (indices 0..5 "hello", 5..8 "   ", 8..13 "world")
+    // Wrapped at 5 chars: row 0 is 0..5, row 1 is 8..13.
+    let rows = wrap_line("hello   world", 5);
+    assert_eq!(rows, vec![0..5, 8..13]);
+
+    let layouts = vec![WrappedLineLayout::new(0, rows)];
+
+    // Characters within row 0:
+    assert_eq!(buffer_pos_to_visual_row(Position::new(0, 0), &layouts), (0, 0));
+    assert_eq!(buffer_pos_to_visual_row(Position::new(0, 4), &layouts), (0, 4));
+    assert_eq!(buffer_pos_to_visual_row(Position::new(0, 5), &layouts), (0, 5));
+
+    // Characters in the omitted whitespace gap (cols 6 and 7):
+    // Must NOT teleport to (0, 0); must clamp to the end of visual row 0.
+    assert_eq!(buffer_pos_to_visual_row(Position::new(0, 6), &layouts), (0, 5));
+    assert_eq!(buffer_pos_to_visual_row(Position::new(0, 7), &layouts), (0, 5));
+
+    // Start of second visual row (col 8, 'w'):
+    assert_eq!(buffer_pos_to_visual_row(Position::new(0, 8), &layouts), (1, 0));
+    assert_eq!(buffer_pos_to_visual_row(Position::new(0, 10), &layouts), (1, 2));
+    assert_eq!(buffer_pos_to_visual_row(Position::new(0, 13), &layouts), (1, 5));
+
+    // Beyond EOL: must clamp visual column to (range.end - range.start)
+    assert_eq!(buffer_pos_to_visual_row(Position::new(0, 50), &layouts), (1, 5));
+}
+
+#[test]
+fn test_regression_wrap_layout_caching() {
+    let text = "Line 1 is long enough to wrap\nLine 2";
+    let buffer = TextBuffer::from_str(text);
+    let mut editor = EditorState::new(buffer);
+
+    // Initial state
+    assert!(editor.wrap_dirty);
+    assert_eq!(editor.cached_wrap_cols, 0);
+    assert!(editor.cached_wrapped_layouts.is_empty());
+
+    // First update computes layouts and caches them
+    editor.update_wrapped_layouts(10);
+    assert!(!editor.wrap_dirty);
+    assert_eq!(editor.cached_wrap_cols, 10);
+    assert_eq!(editor.cached_wrapped_layouts.len(), 2);
+    let initial_row_count = editor.cached_wrapped_layouts[0].row_count();
+    assert!(initial_row_count > 1);
+
+    // Marker sentinel to verify cache hit
+    editor.cached_wrapped_layouts[0].line_index = 999;
+
+    // Second call with same column count: must be a cache hit (line_index remains 999)
+    editor.update_wrapped_layouts(10);
+    assert_eq!(editor.cached_wrapped_layouts[0].line_index, 999);
+
+    // Column count change invalidates cache and recomputes
+    editor.update_wrapped_layouts(40);
+    assert_eq!(editor.cached_wrap_cols, 40);
+    assert_eq!(editor.cached_wrapped_layouts[0].line_index, 0); // recomputed!
+
+    // Typing text sets wrap_dirty = true
+    editor.insert_text(" additional text");
+    assert!(editor.wrap_dirty);
+
+    // Next update recomputes
+    editor.update_wrapped_layouts(40);
+    assert!(!editor.wrap_dirty);
+
+    // Backspace marks wrap_dirty
+    editor.backspace();
+    assert!(editor.wrap_dirty);
+
+    editor.update_wrapped_layouts(40);
+    assert!(!editor.wrap_dirty);
+
+    // Undo marks wrap_dirty
+    editor.undo();
+    assert!(editor.wrap_dirty);
+}

@@ -175,13 +175,16 @@ pub fn buffer_pos_to_visual_row(
             for (sub_idx, range) in layout.rows.iter().enumerate() {
                 let is_last_sub = sub_idx + 1 == layout.rows.len();
                 if is_last_sub {
-                    if pos.column >= range.start {
-                        let visual_col = pos.column.saturating_sub(range.start);
+                    let max_col = range.end.saturating_sub(range.start);
+                    let visual_col = pos.column.saturating_sub(range.start).min(max_col);
+                    return (accumulated_rows + sub_idx, visual_col);
+                } else {
+                    let next_range = &layout.rows[sub_idx + 1];
+                    if pos.column < next_range.start {
+                        let max_col = range.end.saturating_sub(range.start);
+                        let visual_col = pos.column.saturating_sub(range.start).min(max_col);
                         return (accumulated_rows + sub_idx, visual_col);
                     }
-                } else if pos.column <= range.end {
-                    let visual_col = pos.column.saturating_sub(range.start);
-                    return (accumulated_rows + sub_idx, visual_col);
                 }
             }
 
