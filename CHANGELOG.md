@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.0] - 2026-11-17
+
+### Added (Milestone 3: Developer Tools)
+- **Git Integration & Version Control Subsystem (`rustforge-git`, `rustforge-app`)**:
+  - Full libgit2-backed repository engine (`GitRepository`) supporting repository discovery, status categorization (`staged`, `unstaged`, `untracked`, `conflicted`), file staging/unstaging, `stage_all`, discard changes (tracked checkouts and untracked removals), and commit creation with signature fallbacks.
+  - Upstream branch tracking and sync metrics (`ahead`/`behind` commit counters).
+  - Line-level blame retrieval (`blame_line`) with relative timestamp human-readable formatting.
+  - Interactive Source Control sidebar panel (`Ctrl+Shift+G`) with branch switcher, ahead/behind indicators, commit input with `Ctrl+Enter` shortcut, and staged/unstaged/untracked file lists with granular action buttons.
+- **Visual Diff Viewer & Gutter Change Strips (`rustforge-git`, `rustforge-editor`, `rustforge-app`)**:
+  - Pure-Rust unified and inline diff engine powered by `similar` with character-level `InlineSpan` change highlighting.
+  - 3px colored gutter strips on editor margins: Green (`+`) for added lines, Blue (`~`) for modifications, and Red for deleted line markers.
+  - Dedicated visual `DiffView` component supporting both **Unified** and **Side-by-side** comparison modes, statistics badges (`+X`, `-Y`, `~Z`), hunk headers (`@@ -old,len +new,len @@`), line background tints, and inline span pill overlays.
+  - Seamless diff tab integration (`Tab::new_diff`) allowing instant file comparison when clicking changed files in the sidebar.
+- **Language Server Protocol Subsystem (`rustforge-language-server`)**:
+  - Asynchronous JSON-RPC 2.0 client actor (`LspClient`) over Tokio child process standard I/O pipes.
+  - Streaming `Content-Length: <len>\r\n\r\n` framing parser handling fragmented buffers, multiple concatenated messages, and arbitrary headers.
+  - Thread-safe `DiagnosticStore` (`parking_lot::RwLock`) supporting exact path lookups, 0-based line indexing, and multi-line span intersections.
+  - Language server discovery orchestrator (`LspManager`) automatically resolving file extensions to binaries on `PATH` (`rust-analyzer`, `pyright`, `typescript-language-server`, `clangd`, `gopls`).
+- **Editor LSP Features (`rustforge-editor`, `rustforge-app`)**:
+  - Gutter diagnostic severity badges (❌ Error, ⚠ Warning, ℹ Info, 💡 Hint).
+  - Diagnostic squiggly wave underlines (`paint_diagnostic_squiggle`) rendered under error/warning ranges.
+  - Floating autocomplete suggestion popup (`Ctrl+Space`) with completion kind icons (ƒ function, k keyword, v variable, s struct), keyboard navigation (`Up`/`Down`, `Enter`/`Tab`, `Esc`), and smart word prefix replacement.
+  - Floating hover documentation card (`Ctrl+I` / `Alt+H`).
+  - Go to Definition command (`F12`) jumping to symbol declaration file and position.
+  - Document formatting command (`Shift+Alt+F`) applying LSP `TextEdit`s in reverse line order.
+- **Multi-Session Tabbed & Split Terminals (`rustforge-terminal`, `rustforge-app`)**:
+  - `TerminalManager` orchestrating concurrent PTY terminal sessions with active index and split state.
+  - Terminal tab bar in bottom panel with active/focus indicators, session switching, and per-tab close `✕` buttons.
+  - Action buttons: New Session `+`, Toggle Split `◫`, Clear `🗑`, Hide `×`.
+  - Side-by-side (Vertical) and stacked (Horizontal) split layout rendering with safe simultaneous mutable session borrowing via `split_at_mut`.
+  - Independent PTY resizing and dynamic focus routing ensuring keystrokes deliver directly to the focused terminal pane.
+  - Child shell process exit detection with clean tab pruning via `remove_dead_sessions()`.
+
 ## [0.2.1] - 2026-11-17
 
 ### Fixed
