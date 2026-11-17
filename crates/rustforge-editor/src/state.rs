@@ -22,6 +22,7 @@ pub struct EditorState {
     pub cached_wrapped_layouts: Vec<WrappedLineLayout>,
     pub cached_wrap_cols: usize,
     pub wrap_dirty: bool,
+    pub git_diff: Option<rustforge_git::FileDiff>,
 }
 
 impl EditorState {
@@ -51,7 +52,20 @@ impl EditorState {
             cached_wrapped_layouts: Vec::new(),
             cached_wrap_cols: 0,
             wrap_dirty: true,
+            git_diff: None,
         }
+    }
+
+    pub fn set_git_diff(&mut self, diff: Option<rustforge_git::FileDiff>) {
+        self.git_diff = diff;
+    }
+
+    pub fn line_git_change(&self, line_1_based: usize) -> Option<rustforge_git::LineChange> {
+        let diff = self.git_diff.as_ref()?;
+        if line_1_based == 0 || line_1_based > self.buffer.line_count() {
+            return None;
+        }
+        diff.line_change_at(line_1_based)
     }
 
     pub fn primary_cursor(&self) -> Selection {

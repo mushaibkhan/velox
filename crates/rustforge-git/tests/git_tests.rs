@@ -246,6 +246,12 @@ fn test_diff_edge_cases() {
     let active = add_diff.active_line_changes();
     assert_eq!(active.get(&1), Some(&LineChange::Added));
     assert_eq!(active.get(&2), Some(&LineChange::Added));
+
+    // Deletion detection
+    let del_diff = compute_diff("line 1\nline 2\nline 3\n", "line 1\nline 3\n");
+    assert_eq!(del_diff.line_change_at(1), Some(LineChange::Unchanged));
+    assert_eq!(del_diff.line_change_at(2), Some(LineChange::Deleted));
+    assert_eq!(del_diff.line_change_at(3), None);
 }
 
 #[test]

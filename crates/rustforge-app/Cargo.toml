@@ -18,6 +18,7 @@ rustforge-workspace.workspace = true
 rustforge-themes.workspace = true
 rustforge-settings.workspace = true
 rustforge-search.workspace = true
+rustforge-git.workspace = true
 
 eframe.workspace = true
 egui.workspace = true

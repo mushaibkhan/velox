@@ -338,6 +338,17 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
                                     if v_row >= start_v_row && v_row < end_v_row {
                                         let row_y = rect.min.y + (v_row as f32 * line_height);
 
+                                        // Git gutter marker strip
+                                        if let Some(change) = editor.line_git_change(line_idx + 1) {
+                                            if let Some(color) = git_gutter_color(change) {
+                                                let strip_rect = Rect::from_min_size(
+                                                    pos2(gutter_rect.right() - 3.0, row_y),
+                                                    vec2(3.0, line_height),
+                                                );
+                                                painter.rect_filled(strip_rect, 0.0, color);
+                                            }
+                                        }
+
                                         // 1. Line numbers and soft continuation marker
                                         if show_line_numbers {
                                             if sub_idx == 0 {
@@ -443,6 +454,17 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
 
                         for line_idx in start_line..end_line {
                             let line_y = rect.min.y + (line_idx as f32 * line_height);
+
+                            // Git gutter marker strip
+                            if let Some(change) = editor.line_git_change(line_idx + 1) {
+                                if let Some(color) = git_gutter_color(change) {
+                                    let strip_rect = Rect::from_min_size(
+                                        pos2(gutter_rect.right() - 3.0, line_y),
+                                        vec2(3.0, line_height),
+                                    );
+                                    painter.rect_filled(strip_rect, 0.0, color);
+                                }
+                            }
 
                             // 1. Line numbers
                             if show_line_numbers {
@@ -827,4 +849,13 @@ fn render_empty_editor(app: &RustForgeApp, ui: &mut Ui) {
             ui.label(RichText::new("Ctrl+`  •  Integrated Terminal").color(app.theme.fg_secondary));
         });
     });
+}
+
+fn git_gutter_color(change: rustforge_git::LineChange) -> Option<egui::Color32> {
+    match change {
+        rustforge_git::LineChange::Added => Some(egui::Color32::from_rgb(75, 175, 80)),
+        rustforge_git::LineChange::Modified => Some(egui::Color32::from_rgb(60, 140, 230)),
+        rustforge_git::LineChange::Deleted => Some(egui::Color32::from_rgb(230, 80, 80)),
+        rustforge_git::LineChange::Unchanged => None,
+    }
 }
