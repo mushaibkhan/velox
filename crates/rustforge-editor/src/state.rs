@@ -23,6 +23,12 @@ pub struct EditorState {
     pub cached_wrap_cols: usize,
     pub wrap_dirty: bool,
     pub git_diff: Option<rustforge_git::FileDiff>,
+    pub diagnostics: Vec<rustforge_language_server::DiagnosticItem>,
+    pub completion_items: Vec<lsp_types::CompletionItem>,
+    pub show_completion: bool,
+    pub completion_selected_idx: usize,
+    pub hover_text: Option<String>,
+    pub show_hover: bool,
 }
 
 impl EditorState {
@@ -53,6 +59,12 @@ impl EditorState {
             cached_wrap_cols: 0,
             wrap_dirty: true,
             git_diff: None,
+            diagnostics: Vec::new(),
+            completion_items: Vec::new(),
+            show_completion: false,
+            completion_selected_idx: 0,
+            hover_text: None,
+            show_hover: false,
         }
     }
 
@@ -66,6 +78,113 @@ impl EditorState {
             return None;
         }
         diff.line_change_at(line_1_based)
+    }
+
+    // LSP Diagnostic methods
+    pub fn set_diagnostics(&mut self, items: Vec<rustforge_language_server::DiagnosticItem>) {
+        self.diagnostics = items;
+    }
+
+    pub fn diagnostics_for_line(
+        &self,
+        line_0_based: usize,
+    ) -> Vec<&rustforge_language_server::DiagnosticItem> {
+        self.diagnostics
+            .iter()
+            .filter(|item| {
+                if line_0_based < item.range.start.line || line_0_based > item.range.end.line {
+                    return false;
+                }
+                // Exclude multi-line ranges that terminate at column 0 of target line
+                if line_0_based == item.range.end.line
+                    && item.range.end.column == 0
+                    && item.range.end.line > item.range.start.line
+                {
+                    return false;
+                }
+                true
+            })
+            .collect()
+    }
+
+    pub fn highest_severity_for_line(
+        &self,
+        line_0_based: usize,
+    ) -> Option<rustforge_language_server::DiagnosticSeverity> {
+        self.diagnostics_for_line(line_0_based)
+            .into_iter()
+            .map(|item| item.severity)
+            .min_by_key(|&sev| match sev {
+                rustforge_language_server::DiagnosticSeverity::Error => 1,
+                rustforge_language_server::DiagnosticSeverity::Warning => 2,
+                rustforge_language_server::DiagnosticSeverity::Information => 3,
+                rustforge_language_server::DiagnosticSeverity::Hint => 4,
+            })
+    }
+
+    // LSP Completion methods
+    pub fn set_completions(&mut self, items: Vec<lsp_types::CompletionItem>) {
+        self.show_completion = !items.is_empty();
+        self.completion_items = items;
+        self.completion_selected_idx = 0;
+    }
+
+    pub fn close_completion(&mut self) {
+        self.show_completion = false;
+        self.completion_items.clear();
+        self.completion_selected_idx = 0;
+    }
+
+    pub fn select_next_completion(&mut self) {
+        if self.completion_items.is_empty() {
+            return;
+        }
+        self.completion_selected_idx =
+            (self.completion_selected_idx + 1) % self.completion_items.len();
+    }
+
+    pub fn select_prev_completion(&mut self) {
+        if self.completion_items.is_empty() {
+            return;
+        }
+        if self.completion_selected_idx == 0 {
+            self.completion_selected_idx = self.completion_items.len() - 1;
+        } else {
+            self.completion_selected_idx -= 1;
+        }
+    }
+
+    pub fn selected_completion(&self) -> Option<&lsp_types::CompletionItem> {
+        self.completion_items.get(self.completion_selected_idx)
+    }
+
+    pub fn apply_selected_completion(&mut self) -> bool {
+        let text_to_insert = if let Some(item) = self.selected_completion() {
+            if let Some(ref it) = item.insert_text {
+                it.clone()
+            } else if let Some(lsp_types::CompletionTextEdit::Edit(ref edit)) = item.text_edit {
+                edit.new_text.clone()
+            } else {
+                item.label.clone()
+            }
+        } else {
+            return false;
+        };
+
+        self.insert_text(&text_to_insert);
+        self.close_completion();
+        true
+    }
+
+    // LSP Hover methods
+    pub fn set_hover(&mut self, text: Option<String>) {
+        self.show_hover = text.is_some();
+        self.hover_text = text;
+    }
+
+    pub fn close_hover(&mut self) {
+        self.show_hover = false;
+        self.hover_text = None;
     }
 
     pub fn primary_cursor(&self) -> Selection {

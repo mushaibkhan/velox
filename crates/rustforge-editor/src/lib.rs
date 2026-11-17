@@ -11,7 +11,9 @@ pub use minimap::{
     effective_track_height, minimap_line_to_editor_line, minimap_y_to_editor_line,
     thumb_y_to_scroll_line, MinimapLine, MinimapState, MinimapThumb,
 };
+pub use lsp_types;
 pub use rustforge_git::{FileDiff, LineChange};
+pub use rustforge_language_server::{DiagnosticItem, DiagnosticSeverity};
 pub use state::EditorState;
 pub use wrap::{
     buffer_pos_to_visual_row, visual_row_to_buffer_pos, wrap_line, WrappedLineLayout,

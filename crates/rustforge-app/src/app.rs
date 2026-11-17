@@ -67,6 +67,10 @@ pub struct RustForgeApp {
     pub git_branch: String,
     pub git_ahead_behind: (usize, usize),
     pub git_commit_message: String,
+
+    // LSP
+    pub lsp_manager: Option<rustforge_language_server::LspManager>,
+    pub tokio_rt: Option<std::sync::Arc<tokio::runtime::Runtime>>,
 }
 
 impl RustForgeApp {
@@ -118,6 +122,8 @@ impl RustForgeApp {
             git_branch: String::new(),
             git_ahead_behind: (0, 0),
             git_commit_message: String::new(),
+            lsp_manager: Some(rustforge_language_server::LspManager::new()),
+            tokio_rt: tokio::runtime::Runtime::new().ok().map(std::sync::Arc::new),
         };
 
         // Try to start default terminal session with egui repaint callback
@@ -170,6 +176,8 @@ impl RustForgeApp {
             git_branch: String::new(),
             git_ahead_behind: (0, 0),
             git_commit_message: String::new(),
+            lsp_manager: Some(rustforge_language_server::LspManager::new()),
+            tokio_rt: tokio::runtime::Runtime::new().ok().map(std::sync::Arc::new),
         };
         app.refresh_git();
         app
@@ -266,6 +274,13 @@ impl RustForgeApp {
             "Edit",
             Action::SelectAll,
             Some("Ctrl+A"),
+        ));
+        commands.push(CommandItem::new(
+            "edit.format",
+            "Format Document",
+            "Edit",
+            Action::FormatDocument,
+            Some("Shift+Alt+F"),
         ));
         commands.push(CommandItem::new(
             "app.quit",
@@ -679,6 +694,7 @@ impl RustForgeApp {
             }
             Action::ToggleSidebar => self.sidebar_visible = !self.sidebar_visible,
             Action::ToggleTerminal => self.terminal_visible = !self.terminal_visible,
+            Action::FormatDocument => self.trigger_formatting(),
             Action::Quit => std::process::exit(0),
             _ => {}
         }
@@ -778,6 +794,316 @@ impl RustForgeApp {
         }
     }
 
+    // LSP Integration Methods
+    pub fn run_async<F, R>(&self, f: F) -> Option<R>
+    where
+        F: std::future::Future<Output = R> + Send,
+        R: Send,
+    {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread {
+                Some(tokio::task::block_in_place(|| handle.block_on(f)))
+            } else {
+                std::thread::scope(|s| {
+                    s.spawn(|| {
+                        let rt = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .ok()?;
+                        Some(rt.block_on(f))
+                    })
+                    .join()
+                    .ok()
+                    .flatten()
+                })
+            }
+        } else if let Some(ref rt) = self.tokio_rt {
+            Some(rt.block_on(f))
+        } else {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .ok()?;
+            Some(rt.block_on(f))
+        }
+    }
+
+    pub fn sync_lsp_diagnostics(&mut self) {
+        let Some(ref lsp) = self.lsp_manager else {
+            return;
+        };
+        let store = lsp.diagnostic_store();
+        for tab in &mut self.tabs {
+            if let Some(path) = tab.path() {
+                let diags = store.get_diagnostics_for_path(path);
+                tab.editor.set_diagnostics(diags);
+            }
+        }
+    }
+
+    pub fn trigger_completion(&mut self) {
+        let active_idx = match self.active_tab_idx {
+            Some(idx) if idx < self.tabs.len() => idx,
+            _ => return,
+        };
+        let (path, pos) = {
+            let tab = &self.tabs[active_idx];
+            let Some(path) = tab.path() else { return; };
+            (path.to_path_buf(), tab.editor.primary_position())
+        };
+
+        let Ok(uri) = rustforge_language_server::path_to_uri(&path) else {
+            return;
+        };
+
+        let client = {
+            let Some(ref lsp) = self.lsp_manager else {
+                return;
+            };
+            if let Some(c) = lsp.get_client_for_path(&path) {
+                Some(c)
+            } else {
+                let root_uri = self
+                    .workspace
+                    .root_path
+                    .as_deref()
+                    .and_then(|r| rustforge_language_server::path_to_uri(r).ok());
+                self.run_async(lsp.start_client_for_path(&path, root_uri))
+                    .and_then(|res| res.ok())
+            }
+        };
+
+        let Some(client) = client else {
+            return;
+        };
+
+        let client_arc = client.clone();
+        let completion_res = self.run_async(async move { client_arc.completion(uri, pos).await });
+        let items = match completion_res {
+            Some(Ok(Some(lsp_types::CompletionResponse::Array(arr)))) => arr,
+            Some(Ok(Some(lsp_types::CompletionResponse::List(list)))) => list.items,
+            _ => Vec::new(),
+        };
+
+        if let Some(tab) = self.tabs.get_mut(active_idx) {
+            tab.editor.set_completions(items);
+            tab.editor.show_completion = true;
+        }
+    }
+
+    pub fn trigger_hover(&mut self) {
+        let active_idx = match self.active_tab_idx {
+            Some(idx) if idx < self.tabs.len() => idx,
+            _ => return,
+        };
+        let (path, pos) = {
+            let tab = &self.tabs[active_idx];
+            let Some(path) = tab.path() else { return; };
+            (path.to_path_buf(), tab.editor.primary_position())
+        };
+
+        let Ok(uri) = rustforge_language_server::path_to_uri(&path) else {
+            return;
+        };
+
+        let client = {
+            let Some(ref lsp) = self.lsp_manager else {
+                return;
+            };
+            if let Some(c) = lsp.get_client_for_path(&path) {
+                Some(c)
+            } else {
+                let root_uri = self
+                    .workspace
+                    .root_path
+                    .as_deref()
+                    .and_then(|r| rustforge_language_server::path_to_uri(r).ok());
+                self.run_async(lsp.start_client_for_path(&path, root_uri))
+                    .and_then(|res| res.ok())
+            }
+        };
+
+        let Some(client) = client else {
+            return;
+        };
+
+        let client_arc = client.clone();
+        let hover_res = self.run_async(async move { client_arc.hover(uri, pos).await });
+        let hover_text = match hover_res {
+            Some(Ok(Some(hover))) => {
+                let text = format_hover_contents(&hover.contents);
+                if text.is_empty() {
+                    None
+                } else {
+                    Some(text)
+                }
+            }
+            _ => None,
+        };
+
+        if let Some(tab) = self.tabs.get_mut(active_idx) {
+            tab.editor.hover_text = hover_text;
+            tab.editor.show_hover = true;
+        }
+    }
+
+    pub fn trigger_goto_definition(&mut self) {
+        let active_idx = match self.active_tab_idx {
+            Some(idx) if idx < self.tabs.len() => idx,
+            _ => return,
+        };
+        let (path, pos) = {
+            let tab = &self.tabs[active_idx];
+            let Some(path) = tab.path() else { return; };
+            (path.to_path_buf(), tab.editor.primary_position())
+        };
+
+        let Ok(uri) = rustforge_language_server::path_to_uri(&path) else {
+            return;
+        };
+
+        let client = {
+            let Some(ref lsp) = self.lsp_manager else {
+                return;
+            };
+            if let Some(c) = lsp.get_client_for_path(&path) {
+                Some(c)
+            } else {
+                let root_uri = self
+                    .workspace
+                    .root_path
+                    .as_deref()
+                    .and_then(|r| rustforge_language_server::path_to_uri(r).ok());
+                self.run_async(lsp.start_client_for_path(&path, root_uri))
+                    .and_then(|res| res.ok())
+            }
+        };
+
+        let Some(client) = client else {
+            return;
+        };
+
+        let client_arc = client.clone();
+        let def_res = self.run_async(async move { client_arc.goto_definition(uri, pos).await });
+        let target = match def_res {
+            Some(Ok(Some(lsp_types::GotoDefinitionResponse::Scalar(loc)))) => {
+                Some((loc.uri, loc.range))
+            }
+            Some(Ok(Some(lsp_types::GotoDefinitionResponse::Array(arr)))) => {
+                arr.into_iter().next().map(|loc| (loc.uri, loc.range))
+            }
+            Some(Ok(Some(lsp_types::GotoDefinitionResponse::Link(links)))) => links
+                .into_iter()
+                .next()
+                .map(|link| (link.target_uri, link.target_selection_range)),
+            _ => None,
+        };
+
+        if let Some((target_uri, target_range)) = target {
+            let target_path = rustforge_language_server::uri_to_path(&target_uri);
+            self.open_file(&target_path);
+            if let Some(idx) = self.active_tab_idx {
+                if let Some(tab) = self.tabs.get_mut(idx) {
+                    let target_pos = rustforge_core::Position::new(
+                        target_range.start.line as usize,
+                        target_range.start.character as usize,
+                    );
+                    let char_offset = tab.editor.buffer.position_to_char(target_pos);
+                    tab.editor.cursors = vec![rustforge_core::Selection::point(char_offset)];
+                    tab.editor.primary_cursor_idx = 0;
+                    tab.editor.scroll_cursor_into_view();
+                }
+            }
+        }
+    }
+
+    pub fn trigger_formatting(&mut self) {
+        let active_idx = match self.active_tab_idx {
+            Some(idx) if idx < self.tabs.len() => idx,
+            _ => return,
+        };
+        let (path, tab_size) = {
+            let tab = &self.tabs[active_idx];
+            let Some(path) = tab.path() else { return; };
+            (path.to_path_buf(), tab.editor.tab_size as u32)
+        };
+
+        let Ok(uri) = rustforge_language_server::path_to_uri(&path) else {
+            return;
+        };
+
+        let client = {
+            let Some(ref lsp) = self.lsp_manager else {
+                return;
+            };
+            if let Some(c) = lsp.get_client_for_path(&path) {
+                Some(c)
+            } else {
+                let root_uri = self
+                    .workspace
+                    .root_path
+                    .as_deref()
+                    .and_then(|r| rustforge_language_server::path_to_uri(r).ok());
+                self.run_async(lsp.start_client_for_path(&path, root_uri))
+                    .and_then(|res| res.ok())
+            }
+        };
+
+        let Some(client) = client else {
+            return;
+        };
+
+        let client_arc = client.clone();
+        let format_res = self.run_async(async move { client_arc.formatting(uri, tab_size, true).await });
+        if let Some(Ok(Some(edits))) = format_res {
+            if let Some(tab) = self.tabs.get_mut(active_idx) {
+                let mut sorted_edits = edits;
+                sorted_edits.sort_by(|a, b| {
+                    b.range
+                        .start
+                        .line
+                        .cmp(&a.range.start.line)
+                        .then_with(|| b.range.start.character.cmp(&a.range.start.character))
+                });
+
+                for edit in sorted_edits {
+                    let start_pos = rustforge_core::Position::new(
+                        edit.range.start.line as usize,
+                        edit.range.start.character as usize,
+                    );
+                    let end_pos = rustforge_core::Position::new(
+                        edit.range.end.line as usize,
+                        edit.range.end.character as usize,
+                    );
+                    let start_char = tab.editor.buffer.position_to_char(start_pos);
+                    let end_char = tab.editor.buffer.position_to_char(end_pos);
+
+                    if start_char != end_char {
+                        tab.editor.buffer.delete_range(
+                            start_char,
+                            end_char,
+                            tab.editor.cursors.clone(),
+                        );
+                    }
+                    if !edit.new_text.is_empty() {
+                        tab.editor.buffer.insert(
+                            start_char,
+                            &edit.new_text,
+                            tab.editor.cursors.clone(),
+                        );
+                    }
+                }
+                let total = tab.editor.buffer.total_chars();
+                for cursor in &mut tab.editor.cursors {
+                    cursor.anchor = cursor.anchor.min(total);
+                    cursor.head = cursor.head.min(total);
+                }
+                tab.editor.wrap_dirty = true;
+                tab.editor.update_minimap();
+            }
+        }
+    }
+
     fn handle_global_shortcuts(&mut self, ctx: &egui::Context) {
         let input = ctx.input(|i| i.clone());
 
@@ -788,6 +1114,15 @@ impl RustForgeApp {
             // Ctrl+Shift+G => Source Control
             self.active_sidebar = SidebarTab::Git;
             self.sidebar_visible = true;
+        } else if input.modifiers.ctrl && input.key_pressed(Key::Space) {
+            // Ctrl+Space => LSP Autocomplete
+            self.trigger_completion();
+        } else if input.key_pressed(Key::F12) {
+            // F12 => LSP Go to Definition
+            self.trigger_goto_definition();
+        } else if input.modifiers.shift && input.modifiers.alt && input.key_pressed(Key::F) {
+            // Shift+Alt+F => Format Document
+            self.trigger_formatting();
         } else if input.modifiers.ctrl && input.key_pressed(Key::P) {
             // Ctrl+P => Quick Open
             self.dispatch_action(Action::QuickOpen);
@@ -825,6 +1160,28 @@ impl RustForgeApp {
     }
 }
 
+fn format_hover_contents(contents: &lsp_types::HoverContents) -> String {
+    match contents {
+        lsp_types::HoverContents::Scalar(marked) => match marked {
+            lsp_types::MarkedString::String(s) => s.clone(),
+            lsp_types::MarkedString::LanguageString(ls) => {
+                format!("```{}\n{}\n```", ls.language, ls.value)
+            }
+        },
+        lsp_types::HoverContents::Array(arr) => arr
+            .iter()
+            .map(|marked| match marked {
+                lsp_types::MarkedString::String(s) => s.clone(),
+                lsp_types::MarkedString::LanguageString(ls) => {
+                    format!("```{}\n{}\n```", ls.language, ls.value)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+        lsp_types::HoverContents::Markup(m) => m.value.clone(),
+    }
+}
+
 fn paths_match(p1: &Path, p2: &Path) -> bool {
     if p1 == p2 {
         return true;
@@ -841,6 +1198,7 @@ impl eframe::App for RustForgeApp {
             self.egui_ctx = Some(ctx.clone());
         }
         self.drain_file_events();
+        self.sync_lsp_diagnostics();
         self.handle_global_shortcuts(ctx);
 
         // 1. Top Menu Bar
