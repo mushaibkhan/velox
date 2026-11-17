@@ -47,6 +47,20 @@ impl SyntaxHighlighter {
                 break;
             }
 
+            // Markdown Headings
+            if self.language == Language::Markdown && ch == '#' {
+                let start_idx = i;
+                while i < num_chars && chars[i].1 == '#' {
+                    i += 1;
+                }
+                tokens.push(TokenSpan::new(
+                    line_char_offset + start_idx,
+                    line_char_offset + i,
+                    TokenType::Keyword,
+                ));
+                continue;
+            }
+
             // 2. Strings
             if ch == '"' || ch == '\'' || ch == '`' {
                 let quote = ch;
@@ -130,7 +144,7 @@ impl SyntaxHighlighter {
                 ));
                 i += 1;
                 continue;
-            } else if "{}()[].,;".contains(ch) {
+            } else if "{}()[].,;:#@$\\".contains(ch) {
                 tokens.push(TokenSpan::new(
                     line_char_offset + i,
                     line_char_offset + i + 1,
@@ -140,15 +154,10 @@ impl SyntaxHighlighter {
                 continue;
             }
 
-            // 6. Whitespace / default
+            // 6. Whitespace / default text
             let start_idx = i;
             while i < num_chars
-                && !chars[i].1.is_alphanumeric()
-                && chars[i].1 != '_'
-                && chars[i].1 != '"'
-                && chars[i].1 != '\''
-                && chars[i].1 != '`'
-                && !"{}[],.;=+-*/%&|^!<>?:~#/".contains(chars[i].1)
+                && chars[i].1.is_whitespace()
             {
                 i += 1;
             }
@@ -158,6 +167,14 @@ impl SyntaxHighlighter {
                     line_char_offset + i,
                     TokenType::Text,
                 ));
+            } else {
+                // Guaranteed progress: consume the character as Text
+                tokens.push(TokenSpan::new(
+                    line_char_offset + i,
+                    line_char_offset + i + 1,
+                    TokenType::Text,
+                ));
+                i += 1;
             }
         }
 
