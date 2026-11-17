@@ -718,6 +718,8 @@ fn render_active_editor(app: &mut RustForgeApp, active_idx: usize, ui: &mut Ui) 
                     // Click inside editor to position cursor and grant focus
                     if response.clicked() {
                         set_editor_focus = true;
+                        editor.close_completion();
+                        editor.close_hover();
                         if let Some(mouse_pos) = response.interact_pointer_pos() {
                             if editor.word_wrap {
                                 let clicked_v_row = ((mouse_pos.y - rect.min.y) / line_height).floor().max(0.0) as usize;

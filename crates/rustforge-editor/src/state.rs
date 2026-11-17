@@ -171,6 +171,29 @@ impl EditorState {
             return false;
         };
 
+        // If the preceding characters on this line match the start of text_to_insert, replace the prefix
+        let cursor_offset = self.primary_cursor().head;
+        let mut prefix_len = 0;
+        let line_idx = self.primary_position().line;
+        if let Some(line_str) = self.buffer.line_to_string(line_idx) {
+            let col = self.primary_position().column;
+            let line_chars: Vec<char> = line_str.chars().collect();
+            let mut p = col;
+            while p > 0 && (line_chars[p - 1].is_alphanumeric() || line_chars[p - 1] == '_') {
+                p -= 1;
+            }
+            let prefix: String = line_chars[p..col].iter().collect();
+            if !prefix.is_empty() && text_to_insert.starts_with(&prefix) {
+                prefix_len = prefix.chars().count();
+            }
+        }
+
+        if prefix_len > 0 {
+            let start = cursor_offset - prefix_len;
+            self.buffer.delete_range(start, cursor_offset, self.cursors.clone());
+            self.cursors = vec![Selection::point(start)];
+        }
+
         self.insert_text(&text_to_insert);
         self.close_completion();
         true

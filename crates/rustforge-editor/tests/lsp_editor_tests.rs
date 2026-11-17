@@ -255,3 +255,25 @@ fn test_hover_text_setting_and_clearing() {
     assert!(!editor.show_hover);
     assert_eq!(editor.hover_text, None);
 }
+
+#[test]
+fn test_apply_selected_completion_with_prefix_replacement() {
+    let buffer = TextBuffer::from_str("let x = comp");
+    let mut editor = EditorState::new(buffer);
+    // Cursor at end of "comp" (index 12)
+    editor.cursors = vec![Selection::point(12)];
+    editor.primary_cursor_idx = 0;
+
+    let item = lsp_types::CompletionItem {
+        label: "compute_value".to_string(),
+        insert_text: Some("compute_value(10)".to_string()),
+        ..Default::default()
+    };
+
+    editor.set_completions(vec![item]);
+    let applied = editor.apply_selected_completion();
+    assert!(applied);
+
+    let result_text = editor.buffer.slice_to_string(0, editor.buffer.total_chars());
+    assert_eq!(result_text, "let x = compute_value(10)");
+}

@@ -283,6 +283,27 @@ impl RustForgeApp {
             Some("Shift+Alt+F"),
         ));
         commands.push(CommandItem::new(
+            "lsp.hover",
+            "Show Hover Documentation",
+            "LSP",
+            Action::ShowHover,
+            Some("Ctrl+I"),
+        ));
+        commands.push(CommandItem::new(
+            "lsp.definition",
+            "Go to Definition",
+            "LSP",
+            Action::GoToDefinition,
+            Some("F12"),
+        ));
+        commands.push(CommandItem::new(
+            "lsp.completion",
+            "Trigger Autocomplete",
+            "LSP",
+            Action::TriggerCompletion,
+            Some("Ctrl+Space"),
+        ));
+        commands.push(CommandItem::new(
             "app.quit",
             "Quit Application",
             "Application",
@@ -695,6 +716,9 @@ impl RustForgeApp {
             Action::ToggleSidebar => self.sidebar_visible = !self.sidebar_visible,
             Action::ToggleTerminal => self.terminal_visible = !self.terminal_visible,
             Action::FormatDocument => self.trigger_formatting(),
+            Action::ShowHover => self.trigger_hover(),
+            Action::GoToDefinition => self.trigger_goto_definition(),
+            Action::TriggerCompletion => self.trigger_completion(),
             Action::Quit => std::process::exit(0),
             _ => {}
         }
@@ -836,7 +860,9 @@ impl RustForgeApp {
         for tab in &mut self.tabs {
             if let Some(path) = tab.path() {
                 let diags = store.get_diagnostics_for_path(path);
-                tab.editor.set_diagnostics(diags);
+                if tab.editor.diagnostics != diags {
+                    tab.editor.set_diagnostics(diags);
+                }
             }
         }
     }
@@ -1114,6 +1140,9 @@ impl RustForgeApp {
             // Ctrl+Shift+G => Source Control
             self.active_sidebar = SidebarTab::Git;
             self.sidebar_visible = true;
+        } else if input.modifiers.ctrl && (input.key_pressed(Key::I) || (input.modifiers.alt && input.key_pressed(Key::H))) {
+            // Ctrl+I or Alt+H => LSP Hover Documentation
+            self.trigger_hover();
         } else if input.modifiers.ctrl && input.key_pressed(Key::Space) {
             // Ctrl+Space => LSP Autocomplete
             self.trigger_completion();
