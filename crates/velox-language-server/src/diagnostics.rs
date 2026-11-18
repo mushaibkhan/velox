@@ -233,9 +233,18 @@ impl DiagnosticStore {
             return items.clone();
         }
 
+        let path_norm_str = path.to_string_lossy().replace('\\', "/");
+        let path_clean = path_norm_str.trim_start_matches('/');
+
         // Relative path fallback: check if any stored path ends with requested path
         for (stored_path, items) in read.iter() {
-            if stored_path.ends_with(path) {
+            let stored_str = stored_path.to_string_lossy().replace('\\', "/");
+            let stored_clean = stored_str.trim_start_matches('/');
+            if stored_clean == path_clean
+                || stored_clean.ends_with(path_clean)
+                || path_clean.ends_with(stored_clean)
+                || stored_path.ends_with(path)
+            {
                 return items.clone();
             }
         }
@@ -278,9 +287,20 @@ impl DiagnosticStore {
     /// Clears diagnostics for a specific file path.
     pub fn clear_path(&self, path: &Path) {
         let norm = normalize_path(path);
+        let path_norm_str = path.to_string_lossy().replace('\\', "/");
+        let path_clean = path_norm_str.trim_start_matches('/');
+
         let mut write = self.store.write();
         write.remove(&norm);
         write.remove(path);
+        write.retain(|k, _| {
+            let k_str = k.to_string_lossy().replace('\\', "/");
+            let k_clean = k_str.trim_start_matches('/');
+            !(k_clean == path_clean
+                || k_clean.ends_with(path_clean)
+                || path_clean.ends_with(k_clean)
+                || k.ends_with(path))
+        });
     }
 
     /// Returns the number of files currently having active diagnostics.

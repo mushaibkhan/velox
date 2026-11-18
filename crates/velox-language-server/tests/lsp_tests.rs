@@ -370,10 +370,16 @@ async fn test_mock_lsp_client_lifecycle_and_diagnostics() {
     let init_res = client.initialize(root).await.expect("Initialize failed");
     assert!(init_res.capabilities.hover_provider.is_some());
 
-    // Wait briefly for diagnostic notification dispatch
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    let diags = store.get_diagnostics_for_path(Path::new("/workspace/test.rs"));
+    // Wait for diagnostic notification dispatch
+    let mut diags = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while tokio::time::Instant::now() < deadline {
+        diags = store.get_diagnostics_for_path(Path::new("/workspace/test.rs"));
+        if !diags.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     assert_eq!(diags.len(), 1);
     assert_eq!(diags[0].message, "syntax error: unexpected token");
     assert_eq!(diags[0].severity, DiagnosticSeverity::Error);
