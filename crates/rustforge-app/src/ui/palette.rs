@@ -1,6 +1,24 @@
 use crate::app::RustForgeApp;
-use egui::{pos2, vec2, Color32, Key, RichText, ScrollArea, Stroke, TextEdit, Ui, Window};
+use crate::ui::icons::Icon;
+use egui::{pos2, vec2, Color32, Key, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui, Window};
 use rustforge_search::SearchEngine;
+
+fn get_file_icon_from_path(path: &std::path::Path) -> Icon {
+    let name = path
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if name.ends_with(".rs") {
+        Icon::FileRust
+    } else if name.ends_with(".toml") {
+        Icon::FileToml
+    } else if name.ends_with(".md") {
+        Icon::FileMarkdown
+    } else {
+        Icon::FileGeneric
+    }
+}
 
 pub fn render_command_palette(app: &mut RustForgeApp, ctx: &egui::Context) {
     if !app.command_palette_open && !app.quick_open_open {
@@ -15,12 +33,12 @@ pub fn render_command_palette(app: &mut RustForgeApp, ctx: &egui::Context) {
         screen_rect.min.y + 60.0,
     );
 
-    // Dark backdrop
+    // Dark backdrop scrim
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Middle,
         egui::Id::new("modal_backdrop"),
     ));
-    painter.rect_filled(screen_rect, 0.0, Color32::from_black_alpha(120));
+    painter.rect_filled(screen_rect, 0.0, Color32::from_black_alpha(140));
 
     let title = if app.command_palette_open {
         "Command Palette"
@@ -37,8 +55,9 @@ pub fn render_command_palette(app: &mut RustForgeApp, ctx: &egui::Context) {
         .frame(
             egui::Frame::window(&ctx.style())
                 .fill(app.theme.bg_panel)
-                .stroke(Stroke::new(1.0_f32, app.theme.fg_accent))
-                .inner_margin(egui::Margin::same(10.0)),
+                .rounding(6.0)
+                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(42, 44, 56)))
+                .inner_margin(egui::Margin::same(12.0)),
         )
         .show(ctx, |ui| {
             let input = ui.input(|i| i.clone());
@@ -57,6 +76,10 @@ pub fn render_command_palette(app: &mut RustForgeApp, ctx: &egui::Context) {
             };
 
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                let (s_rect, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                Icon::Search.paint(ui.painter(), s_rect, app.theme.fg_accent);
+
                 let text_edit = TextEdit::singleline(&mut app.palette_query)
                     .hint_text(hint)
                     .font(egui::TextStyle::Heading)
@@ -122,7 +145,7 @@ fn render_command_list(app: &mut RustForgeApp, ui: &mut Ui, input: &egui::InputS
         for (idx, cmd) in matches.iter().enumerate() {
             let is_selected = idx == app.palette_selected_idx;
             let bg_color = if is_selected {
-                app.theme.fg_accent
+                Color32::from_rgb(30, 41, 59)
             } else {
                 Color32::TRANSPARENT
             };
@@ -132,30 +155,34 @@ fn render_command_list(app: &mut RustForgeApp, ui: &mut Ui, input: &egui::InputS
                 app.theme.fg_primary
             };
 
-            egui::Frame::none().fill(bg_color).inner_margin(4.0).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let full_title = format!("{}: {}", cmd.category, cmd.title);
-                    if ui
-                        .selectable_label(
-                            is_selected,
-                            RichText::new(full_title).size(13.0).color(text_color),
-                        )
-                        .clicked()
-                    {
-                        action_to_dispatch = Some(cmd.action.clone());
-                    }
+            egui::Frame::none()
+                .fill(bg_color)
+                .rounding(4.0)
+                .inner_margin(egui::Margin::symmetric(6.0, 4.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let full_title = format!("{}: {}", cmd.category, cmd.title);
+                        if ui
+                            .selectable_label(
+                                is_selected,
+                                RichText::new(full_title).size(13.0).color(text_color),
+                            )
+                            .clicked()
+                        {
+                            action_to_dispatch = Some(cmd.action.clone());
+                        }
 
-                    if let Some(shortcut) = &cmd.shortcut {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(
-                                RichText::new(shortcut)
-                                    .size(11.0)
-                                    .color(app.theme.fg_secondary),
-                            );
-                        });
-                    }
+                        if let Some(shortcut) = &cmd.shortcut {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(
+                                    RichText::new(shortcut)
+                                        .size(11.0)
+                                        .color(app.theme.fg_secondary),
+                                );
+                            });
+                        }
+                    });
                 });
-            });
         }
     });
 
@@ -213,7 +240,7 @@ fn render_file_list(app: &mut RustForgeApp, ui: &mut Ui, input: &egui::InputStat
         for (idx, path) in matches.iter().enumerate() {
             let is_selected = idx == app.palette_selected_idx;
             let bg_color = if is_selected {
-                app.theme.fg_accent
+                Color32::from_rgb(30, 41, 59)
             } else {
                 Color32::TRANSPARENT
             };
@@ -223,28 +250,42 @@ fn render_file_list(app: &mut RustForgeApp, ui: &mut Ui, input: &egui::InputStat
                 app.theme.fg_primary
             };
 
-            egui::Frame::none().fill(bg_color).inner_margin(4.0).show(ui, |ui| {
-                let name = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
-                let dir = path.parent().and_then(|p| p.to_str()).unwrap_or("");
+            egui::Frame::none()
+                .fill(bg_color)
+                .rounding(4.0)
+                .inner_margin(egui::Margin::symmetric(6.0, 4.0))
+                .show(ui, |ui| {
+                    let name = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
+                    let dir = path.parent().and_then(|p| p.to_str()).unwrap_or("");
 
-                ui.horizontal(|ui| {
-                    if ui
-                        .selectable_label(
-                            is_selected,
-                            RichText::new(format!("📄 {}", name))
-                                .size(13.0)
-                                .color(text_color),
-                        )
-                        .clicked()
-                    {
-                        path_to_open = Some((*path).clone());
-                    }
+                    ui.horizontal(|ui| {
+                        let (icon_rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                        let file_icon = get_file_icon_from_path(path);
+                        file_icon.paint(
+                            ui.painter(),
+                            icon_rect,
+                            if is_selected {
+                                app.theme.fg_primary
+                            } else {
+                                app.theme.fg_accent
+                            },
+                        );
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(dir).size(10.0).color(app.theme.fg_muted));
+                        if ui
+                            .selectable_label(
+                                is_selected,
+                                RichText::new(name).size(13.0).color(text_color),
+                            )
+                            .clicked()
+                        {
+                            path_to_open = Some((*path).clone());
+                        }
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(RichText::new(dir).size(10.0).color(app.theme.fg_muted));
+                        });
                     });
                 });
-            });
         }
     });
 

@@ -1,5 +1,6 @@
 use crate::app::{RustForgeApp, SidebarTab};
-use egui::{RichText, ScrollArea, TextEdit, Ui};
+use crate::ui::icons::Icon;
+use egui::{vec2, RichText, ScrollArea, Sense, TextEdit, Ui};
 use rustforge_workspace::FileTreeNode;
 
 pub fn render_sidebar(app: &mut RustForgeApp, ui: &mut Ui) {
@@ -29,7 +30,12 @@ fn render_explorer_tab(app: &mut RustForgeApp, ui: &mut Ui) {
     ui.separator();
 
     let root_title = app.workspace.root_name();
-    ui.label(RichText::new(format!("📁 {}", root_title)).strong().color(app.theme.fg_primary));
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let (root_rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+        Icon::FolderOpen.paint(ui.painter(), root_rect, app.theme.fg_accent);
+        ui.label(RichText::new(root_title).strong().color(app.theme.fg_primary));
+    });
 
     ui.add_space(4.0);
 
@@ -78,8 +84,23 @@ fn render_tree_node(
         ui.add_space(indent);
 
         if node.is_dir {
-            let icon = if node.is_expanded { "📂" } else { "📁" };
-            let label = RichText::new(format!("{} {}", icon, node.name))
+            let chev = if node.is_expanded {
+                Icon::ChevronDown
+            } else {
+                Icon::ChevronRight
+            };
+            let (c_rect, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+            chev.paint(ui.painter(), c_rect, app.theme.fg_muted);
+
+            let folder_icon = if node.is_expanded {
+                Icon::FolderOpen
+            } else {
+                Icon::FolderClosed
+            };
+            let (f_rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+            folder_icon.paint(ui.painter(), f_rect, app.theme.fg_accent);
+
+            let label = RichText::new(&node.name)
                 .color(app.theme.fg_primary)
                 .size(13.0);
 
@@ -87,8 +108,17 @@ fn render_tree_node(
                 *folder_to_toggle = Some(node.path.clone());
             }
         } else {
-            let icon = get_file_icon(&node.name);
-            let label = RichText::new(format!("{} {}", icon, node.name))
+            ui.add_space(10.0);
+            let icon = get_file_vector_icon(&node.name);
+            let (f_rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+            let icon_color = if node.name.ends_with(".rs") {
+                app.theme.fg_accent
+            } else {
+                app.theme.fg_secondary
+            };
+            icon.paint(ui.painter(), f_rect, icon_color);
+
+            let label = RichText::new(&node.name)
                 .color(app.theme.fg_secondary)
                 .size(13.0);
 
@@ -105,22 +135,16 @@ fn render_tree_node(
     }
 }
 
-fn get_file_icon(name: &str) -> &'static str {
+fn get_file_vector_icon(name: &str) -> Icon {
     let lower = name.to_lowercase();
     if lower.ends_with(".rs") {
-        "🦀"
-    } else if lower.ends_with(".py") {
-        "🐍"
-    } else if lower.ends_with(".js") || lower.ends_with(".ts") || lower.ends_with(".tsx") {
-        "📜"
-    } else if lower.ends_with(".json") || lower.ends_with(".toml") {
-        "⚙"
+        Icon::FileRust
+    } else if lower.ends_with(".toml") {
+        Icon::FileToml
     } else if lower.ends_with(".md") {
-        "📝"
-    } else if lower.ends_with(".html") || lower.ends_with(".css") {
-        "🌐"
+        Icon::FileMarkdown
     } else {
-        "📄"
+        Icon::FileGeneric
     }
 }
 
@@ -224,12 +248,17 @@ fn render_git_tab(app: &mut RustForgeApp, ui: &mut Ui) {
         (a, b) => format!(" ↑{} ↓{}", a, b),
     };
     let branch_name = if app.git_branch.is_empty() { "HEAD" } else { &app.git_branch };
-    ui.label(
-        RichText::new(format!("🌿 {}{}", branch_name, sync_text))
-            .color(app.theme.fg_primary)
-            .strong()
-            .size(12.0),
-    );
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let (b_rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+        Icon::GitBranch.paint(ui.painter(), b_rect, app.theme.fg_accent);
+        ui.label(
+            RichText::new(format!("{}{}", branch_name, sync_text))
+                .color(app.theme.fg_primary)
+                .strong()
+                .size(12.0),
+        );
+    });
     ui.add_space(6.0);
 
     // Commit Message & Button
