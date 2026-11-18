@@ -431,7 +431,9 @@ impl VeloxApp {
             let need_discover = match &self.git_repo {
                 Some(repo) => {
                     let repo_workdir = repo.workdir();
-                    if let (Ok(c_root), Ok(c_workdir)) = (root.canonicalize(), repo_workdir.canonicalize()) {
+                    if paths_match(root, repo_workdir) {
+                        false
+                    } else if let (Ok(c_root), Ok(c_workdir)) = (root.canonicalize(), repo_workdir.canonicalize()) {
                         !c_root.starts_with(&c_workdir)
                     } else {
                         !root.starts_with(repo_workdir)
@@ -1238,8 +1240,22 @@ fn paths_match(p1: &Path, p2: &Path) -> bool {
     if p1 == p2 {
         return true;
     }
+    let s1 = p1.to_string_lossy().replace('\\', "/");
+    let s2 = p2.to_string_lossy().replace('\\', "/");
+    let s1_clean = s1.strip_prefix("//?/").unwrap_or(&s1);
+    let s2_clean = s2.strip_prefix("//?/").unwrap_or(&s2);
+    if s1_clean.eq_ignore_ascii_case(s2_clean) {
+        return true;
+    }
     if let (Ok(c1), Ok(c2)) = (p1.canonicalize(), p2.canonicalize()) {
-        return c1 == c2;
+        if c1 == c2 {
+            return true;
+        }
+        let cs1 = c1.to_string_lossy().replace('\\', "/");
+        let cs2 = c2.to_string_lossy().replace('\\', "/");
+        let cs1_clean = cs1.strip_prefix("//?/").unwrap_or(&cs1);
+        let cs2_clean = cs2.strip_prefix("//?/").unwrap_or(&cs2);
+        return cs1_clean.eq_ignore_ascii_case(cs2_clean);
     }
     false
 }

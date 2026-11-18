@@ -272,3 +272,37 @@ fn test_format_relative_time() {
     assert_eq!(format_relative_time(now - 70000000), "2 years ago");
 }
 
+#[test]
+fn test_relative_path_cross_platform() {
+    let (temp_dir, git_repo) = init_temp_repo();
+    let root = temp_dir.path();
+
+    // 1. Relative paths return normalized relative with forward slashes
+    assert_eq!(
+        git_repo.relative_path(Path::new("foo.txt")),
+        std::path::PathBuf::from("foo.txt")
+    );
+    assert_eq!(
+        git_repo.relative_path(Path::new("src/main.rs")),
+        std::path::PathBuf::from("src/main.rs")
+    );
+    assert_eq!(
+        git_repo.relative_path(Path::new(r"src\main.rs")),
+        std::path::PathBuf::from("src/main.rs")
+    );
+
+    // 2. Absolute path inside workdir
+    let abs_file = root.join("test.txt");
+    assert_eq!(
+        git_repo.relative_path(&abs_file),
+        std::path::PathBuf::from("test.txt")
+    );
+
+    let abs_nested = root.join("deep").join("nested.txt");
+    assert_eq!(
+        git_repo.relative_path(&abs_nested),
+        std::path::PathBuf::from("deep/nested.txt")
+    );
+}
+
+

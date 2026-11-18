@@ -1,8 +1,95 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use git2::{IndexAddOption, Oid, Repository, Status, StatusOptions};
 
 use crate::blame::{blame_line, BlameInfo};
 use crate::diff::{compute_diff, FileDiff};
+
+fn is_path_relative(path: &Path) -> bool {
+    let s = path.to_string_lossy();
+    let bytes = s.as_bytes();
+    if bytes.is_empty() {
+        return true;
+    }
+    if bytes[0] == b'/' || bytes[0] == b'\\' {
+        return false;
+    }
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        return false;
+    }
+    path.is_relative()
+}
+
+fn clean_verbatim_prefix(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{}", rest))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+fn canonicalize_lossy(path: &Path) -> PathBuf {
+    if let Ok(c) = path.canonicalize() {
+        return clean_verbatim_prefix(&c);
+    }
+    let mut tail = PathBuf::new();
+    let mut current = path;
+    while let Some(parent) = current.parent() {
+        if let Some(file_name) = current.file_name() {
+            if tail.as_os_str().is_empty() {
+                tail = PathBuf::from(file_name);
+            } else {
+                tail = Path::new(file_name).join(tail);
+            }
+        }
+        if let Ok(c) = parent.canonicalize() {
+            return clean_verbatim_prefix(&c).join(tail);
+        }
+        current = parent;
+    }
+    clean_verbatim_prefix(path)
+}
+
+fn normalize_separators(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn components_match(c1: &Component, c2: &Component) -> bool {
+    if c1 == c2 {
+        return true;
+    }
+    let s1 = c1.as_os_str().to_string_lossy();
+    let s2 = c2.as_os_str().to_string_lossy();
+    s1.eq_ignore_ascii_case(&s2)
+}
+
+fn strip_prefix_components(base: &Path, path: &Path) -> Option<PathBuf> {
+    let norm_base_str = normalize_separators(base);
+    let norm_path_str = normalize_separators(path);
+    let norm_base = Path::new(&norm_base_str);
+    let norm_path = Path::new(&norm_path_str);
+
+    let base_comps: Vec<Component> = norm_base.components().collect();
+    let path_comps: Vec<Component> = norm_path.components().collect();
+
+    if path_comps.len() < base_comps.len() {
+        return None;
+    }
+
+    for (b, p) in base_comps.iter().zip(path_comps.iter()) {
+        if !components_match(b, p) {
+            return None;
+        }
+    }
+
+    let mut rel = PathBuf::new();
+    for comp in &path_comps[base_comps.len()..] {
+        rel.push(comp.as_os_str());
+    }
+    Some(rel)
+}
 
 /// Git operation error classifications.
 #[derive(thiserror::Error, Debug)]
@@ -115,12 +202,41 @@ impl GitRepository {
     }
 
     /// Helper to convert absolute or relative paths to relative against `workdir`.
-    pub fn relative_path<'a>(&self, path: &'a Path) -> &'a Path {
-        if let Ok(rel) = path.strip_prefix(&self.workdir) {
-            rel
-        } else {
-            path
+    pub fn relative_path(&self, path: &Path) -> PathBuf {
+        let clean_p = clean_verbatim_prefix(path);
+
+        if is_path_relative(&clean_p) {
+            let s = normalize_separators(&clean_p);
+            return PathBuf::from(s.trim_start_matches('/'));
         }
+
+        let clean_w = clean_verbatim_prefix(&self.workdir);
+
+        // 1. Direct strip_prefix
+        if let Ok(rel) = clean_p.strip_prefix(&clean_w) {
+            let s = normalize_separators(rel);
+            return PathBuf::from(s.trim_start_matches('/'));
+        }
+
+        // 2. Canonicalize lossy (resolves macOS /var -> /private/var and Windows symlinks/UNC)
+        let c_path = canonicalize_lossy(&clean_p);
+        let c_workdir = canonicalize_lossy(&clean_w);
+        if let Ok(rel) = c_path.strip_prefix(&c_workdir) {
+            let s = normalize_separators(rel);
+            return PathBuf::from(s.trim_start_matches('/'));
+        }
+
+        // 3. Component-by-component comparison with separator normalization and case-insensitivity
+        if let Some(rel) = strip_prefix_components(&clean_w, &clean_p) {
+            let s = normalize_separators(&rel);
+            return PathBuf::from(s.trim_start_matches('/'));
+        }
+        if let Some(rel) = strip_prefix_components(&c_workdir, &c_path) {
+            let s = normalize_separators(&rel);
+            return PathBuf::from(s.trim_start_matches('/'));
+        }
+
+        clean_p
     }
 
     /// Scan repository working tree and index status.
@@ -218,13 +334,17 @@ impl GitRepository {
     /// Stage a file into the git index (handles creation, modification, or deletion).
     pub fn stage_file(&self, path: &Path) -> Result<(), GitError> {
         let rel = self.relative_path(path);
-        let full = self.workdir.join(rel);
+        let full = if is_path_relative(path) {
+            self.workdir.join(&rel)
+        } else {
+            path.to_path_buf()
+        };
         let mut index = self.repo.index()?;
 
         if full.exists() {
-            index.add_path(rel)?;
+            index.add_path(&rel)?;
         } else {
-            index.remove_path(rel)?;
+            index.remove_path(&rel)?;
         }
 
         index.write()?;
@@ -239,10 +359,10 @@ impl GitRepository {
         match self.repo.head() {
             Ok(head) => {
                 let commit = head.peel_to_commit()?;
-                self.repo.reset_default(Some(commit.as_object()), [rel])?;
+                self.repo.reset_default(Some(commit.as_object()), [&rel])?;
             }
             Err(_) => {
-                let _ = index.remove_path(rel);
+                let _ = index.remove_path(&rel);
                 index.write()?;
             }
         }
@@ -261,9 +381,13 @@ impl GitRepository {
     /// Discard unstaged changes to a file, reverting to index or HEAD state.
     pub fn discard_file(&self, path: &Path) -> Result<(), GitError> {
         let rel = self.relative_path(path);
-        let full = self.workdir.join(rel);
+        let full = if is_path_relative(path) {
+            self.workdir.join(&rel)
+        } else {
+            path.to_path_buf()
+        };
 
-        if let Ok(st) = self.repo.status_file(rel) {
+        if let Ok(st) = self.repo.status_file(&rel) {
             if st.contains(Status::WT_NEW) {
                 if full.is_dir() {
                     std::fs::remove_dir_all(&full)?;
@@ -275,7 +399,7 @@ impl GitRepository {
         }
 
         let mut checkout = git2::build::CheckoutBuilder::new();
-        checkout.path(rel);
+        checkout.path(&rel);
         checkout.force();
         self.repo.checkout_index(None, Some(&mut checkout))?;
         Ok(())
@@ -399,7 +523,11 @@ impl GitRepository {
     /// Calculate diff of a file between HEAD commit and working directory.
     pub fn diff_file(&self, path: &Path) -> Result<FileDiff, GitError> {
         let rel = self.relative_path(path);
-        let full = self.workdir.join(rel);
+        let full = if is_path_relative(path) {
+            self.workdir.join(&rel)
+        } else {
+            path.to_path_buf()
+        };
 
         let new_text = if full.exists() {
             std::fs::read_to_string(&full)?
@@ -410,7 +538,8 @@ impl GitRepository {
         let old_text = match self.repo.head().and_then(|h| h.peel_to_commit()) {
             Ok(head_commit) => {
                 let tree = head_commit.tree()?;
-                match tree.get_path(rel) {
+                let git_path_str = normalize_separators(&rel);
+                match tree.get_path(Path::new(&git_path_str)) {
                     Ok(entry) => {
                         let blob = self.repo.find_blob(entry.id())?;
                         String::from_utf8_lossy(blob.content()).to_string()
@@ -427,6 +556,6 @@ impl GitRepository {
     /// Blame a single 1-based line of a file.
     pub fn blame_line(&self, path: &Path, line: usize) -> Option<BlameInfo> {
         let rel = self.relative_path(path);
-        blame_line(&self.repo, rel, line)
+        blame_line(&self.repo, &rel, line)
     }
 }
