@@ -8,4 +8,5 @@ Cargo.lock
 .worktrees/
 .superpowers
 .superpowers/
+docs/
 
