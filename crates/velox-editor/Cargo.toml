@@ -1,0 +1,14 @@
+[package]
+name = "velox-editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+velox-core.workspace = true
+velox-text-buffer.workspace = true
+velox-syntax.workspace = true
+velox-git.workspace = true
+velox-language-server = { workspace = true }
+lsp-types = { workspace = true }
+regex.workspace = true

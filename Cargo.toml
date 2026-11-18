@@ -1,37 +1,37 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/rustforge-core",
-    "crates/rustforge-text-buffer",
-    "crates/rustforge-syntax",
-    "crates/rustforge-editor",
-    "crates/rustforge-terminal",
-    "crates/rustforge-workspace",
-    "crates/rustforge-themes",
-    "crates/rustforge-settings",
-    "crates/rustforge-search",
-    "crates/rustforge-git",
-    "crates/rustforge-language-server",
-    "crates/rustforge-app",
+    "crates/velox-core",
+    "crates/velox-text-buffer",
+    "crates/velox-syntax",
+    "crates/velox-editor",
+    "crates/velox-terminal",
+    "crates/velox-workspace",
+    "crates/velox-themes",
+    "crates/velox-settings",
+    "crates/velox-search",
+    "crates/velox-git",
+    "crates/velox-language-server",
+    "crates/velox-app",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.3.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-rustforge-core = { path = "crates/rustforge-core" }
-rustforge-text-buffer = { path = "crates/rustforge-text-buffer" }
-rustforge-syntax = { path = "crates/rustforge-syntax" }
-rustforge-editor = { path = "crates/rustforge-editor" }
-rustforge-terminal = { path = "crates/rustforge-terminal" }
-rustforge-workspace = { path = "crates/rustforge-workspace" }
-rustforge-themes = { path = "crates/rustforge-themes" }
-rustforge-settings = { path = "crates/rustforge-settings" }
-rustforge-search = { path = "crates/rustforge-search" }
-rustforge-git = { path = "crates/rustforge-git" }
-rustforge-language-server = { path = "crates/rustforge-language-server" }
+velox-core = { path = "crates/velox-core" }
+velox-text-buffer = { path = "crates/velox-text-buffer" }
+velox-syntax = { path = "crates/velox-syntax" }
+velox-editor = { path = "crates/velox-editor" }
+velox-terminal = { path = "crates/velox-terminal" }
+velox-workspace = { path = "crates/velox-workspace" }
+velox-themes = { path = "crates/velox-themes" }
+velox-settings = { path = "crates/velox-settings" }
+velox-search = { path = "crates/velox-search" }
+velox-git = { path = "crates/velox-git" }
+velox-language-server = { path = "crates/velox-language-server" }
 
 ropey = "1.6"
 portable-pty = "0.8"

@@ -1,0 +1,15 @@
+[package]
+name = "velox-text-buffer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+velox-core.workspace = true
+ropey.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[[bench]]
+name = "large_file"
+harness = false

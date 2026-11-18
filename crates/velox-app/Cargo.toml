@@ -1,0 +1,41 @@
+[package]
+name = "velox-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "velox_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "velox"
+path = "src/main.rs"
+
+[dependencies]
+velox-core.workspace = true
+velox-text-buffer.workspace = true
+velox-syntax.workspace = true
+velox-editor.workspace = true
+velox-terminal.workspace = true
+velox-workspace.workspace = true
+velox-themes.workspace = true
+velox-settings.workspace = true
+velox-search.workspace = true
+velox-git.workspace = true
+velox-language-server = { workspace = true }
+
+git2 = { version = "0.20", default-features = false }
+eframe.workspace = true
+egui.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rfd.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+lsp-types = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+serde_json.workspace = true
