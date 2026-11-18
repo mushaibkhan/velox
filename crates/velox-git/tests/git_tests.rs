@@ -121,7 +121,7 @@ fn test_stage_all_and_discard() {
     git_repo.discard_file(Path::new("f1.txt")).expect("discard failed");
     assert!(git_repo.status().unwrap().is_clean());
     let content = fs::read_to_string(root.join("f1.txt")).unwrap();
-    assert_eq!(content, "File 1\n");
+    assert_eq!(content.replace("\r\n", "\n"), "File 1\n");
 }
 
 #[test]

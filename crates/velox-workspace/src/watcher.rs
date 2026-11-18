@@ -194,16 +194,19 @@ impl FileWatcher {
                     match raw_rx.recv_timeout(timeout) {
                         Ok((path, kind)) => {
                             let event_opt = match kind {
-                                notify::EventKind::Create(_) => {
-                                    Some(FileEvent::Created(path.clone()))
-                                }
-                                notify::EventKind::Modify(_) => {
-                                    Some(FileEvent::Modified(path.clone()))
-                                }
                                 notify::EventKind::Remove(_) => {
                                     Some(FileEvent::Deleted(path.clone()))
                                 }
-                                _ => None,
+                                notify::EventKind::Create(_) => {
+                                    Some(FileEvent::Created(path.clone()))
+                                }
+                                _ => {
+                                    if !path.exists() {
+                                        Some(FileEvent::Deleted(path.clone()))
+                                    } else {
+                                        Some(FileEvent::Modified(path.clone()))
+                                    }
+                                }
                             };
 
                             if let Some(new_event) = event_opt {

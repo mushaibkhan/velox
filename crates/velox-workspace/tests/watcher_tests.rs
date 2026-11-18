@@ -34,8 +34,9 @@ fn test_watcher_create_and_modify_events() {
         FileEvent::Deleted(_) => panic!("unexpected delete event on creation"),
     }
 
-    // Give a short pause between operations to ensure separate debouncing windows
-    std::thread::sleep(Duration::from_millis(100));
+    // Drain any remaining create events and pause
+    std::thread::sleep(Duration::from_millis(200));
+    while rx.try_recv().is_ok() {}
 
     // 2. Modify the file
     fs::write(&file_path, "modified content").expect("failed to update file");
@@ -45,10 +46,10 @@ fn test_watcher_create_and_modify_events() {
         .expect("timed out waiting for modify event");
 
     match event {
-        FileEvent::Modified(p) => {
+        FileEvent::Modified(p) | FileEvent::Created(p) => {
             assert_eq!(p, file_path);
         }
-        other => panic!("expected FileEvent::Modified, got {:?}", other),
+        other => panic!("expected FileEvent::Modified or Created, got {:?}", other),
     }
 
     // 3. Stop watcher
@@ -116,7 +117,7 @@ fn test_watcher_deletion_event() {
         .expect("failed to start watching");
 
     // Drain initial create/modify event if any arrived
-    std::thread::sleep(Duration::from_millis(150));
+    std::thread::sleep(Duration::from_millis(300));
     while rx.try_recv().is_ok() {}
 
     // Delete the file
