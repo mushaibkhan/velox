@@ -128,11 +128,16 @@ impl FileWatcher {
         let (raw_tx, raw_rx) = mpsc::channel::<(PathBuf, notify::EventKind)>();
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
 
+        let watched_path = path.to_path_buf();
+        let canonical_root = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let raw_sender = raw_tx.clone();
         let mut watcher = RecommendedWatcher::new(
             move |res: notify::Result<notify::Event>| {
                 if let Ok(event) = res {
                     for p in event.paths {
+                        if p == watched_path || p == canonical_root {
+                            continue;
+                        }
                         if !should_ignore_path(&p) {
                             let _ = raw_sender.send((p, event.kind));
                         }

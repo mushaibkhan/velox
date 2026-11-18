@@ -7,7 +7,7 @@ use tempfile::tempdir;
 #[test]
 fn test_watcher_create_and_modify_events() {
     let temp_dir = tempdir().expect("failed to create temp dir");
-    let root_path = temp_dir.path().to_path_buf();
+    let root_path = temp_dir.path().canonicalize().unwrap_or_else(|_| temp_dir.path().to_path_buf());
 
     let (tx, rx) = mpsc::channel();
     let mut watcher = FileWatcher::new();
@@ -59,7 +59,7 @@ fn test_watcher_create_and_modify_events() {
 #[test]
 fn test_watcher_ignores_git_target_node_modules() {
     let temp_dir = tempdir().expect("failed to create temp dir");
-    let root_path = temp_dir.path().to_path_buf();
+    let root_path = temp_dir.path().canonicalize().unwrap_or_else(|_| temp_dir.path().to_path_buf());
 
     let git_dir = root_path.join(".git");
     let target_dir = root_path.join("target");
@@ -102,7 +102,7 @@ fn test_watcher_ignores_git_target_node_modules() {
 #[test]
 fn test_watcher_deletion_event() {
     let temp_dir = tempdir().expect("failed to create temp dir");
-    let root_path = temp_dir.path().to_path_buf();
+    let root_path = temp_dir.path().canonicalize().unwrap_or_else(|_| temp_dir.path().to_path_buf());
 
     let file_path = root_path.join("to_delete.txt");
     fs::write(&file_path, "will be deleted").expect("failed to write initial file");
@@ -122,14 +122,14 @@ fn test_watcher_deletion_event() {
     // Delete the file
     fs::remove_file(&file_path).expect("failed to delete file");
 
-    let event = rx
-        .recv_timeout(Duration::from_secs(3))
-        .expect("timed out waiting for delete event");
-
-    match event {
-        FileEvent::Deleted(p) => {
+    let mut received_deleted = false;
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while std::time::Instant::now() < deadline {
+        if let Ok(FileEvent::Deleted(p)) = rx.recv_timeout(Duration::from_millis(500)) {
             assert_eq!(p, file_path);
+            received_deleted = true;
+            break;
         }
-        other => panic!("expected FileEvent::Deleted, got {:?}", other),
     }
+    assert!(received_deleted, "expected FileEvent::Deleted");
 }

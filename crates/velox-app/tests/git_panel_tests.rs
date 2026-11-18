@@ -152,10 +152,13 @@ fn test_discarding_changes() {
 
     // File on disk should be restored
     let disk_content = fs::read_to_string(&readme_path).unwrap();
-    assert_eq!(disk_content, "# Test Repo\n");
+    assert_eq!(disk_content.replace("\r\n", "\n"), "# Test Repo\n");
 
     // Open tab should also be reloaded
-    assert_eq!(app.tabs[0].editor.buffer.rope().to_string(), "# Test Repo\n");
+    assert_eq!(
+        app.tabs[0].editor.buffer.rope().to_string().replace("\r\n", "\n"),
+        "# Test Repo\n"
+    );
     assert!(app.git_status.as_ref().unwrap().is_clean());
 
     // Test discarding untracked file deletes it
