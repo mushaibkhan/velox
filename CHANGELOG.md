@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.1] - 2026-11-18
+
+### Added (UI Visual Overhaul & Modernization)
+- **Pure Obsidian Minimalist Theme (`rustforge-themes`)**:
+  - Implemented 4-tier elevation hierarchy (`ThemeMode::PureObsidian`): Tier 0 Deep Shell (`#0e0f12`), Tier 1 Recessed Panels (`#121317`), Tier 2 Working Surfaces (`#15161b`), and Tier 3 Elevated Overlays (`#1c1d24`).
+  - Added WCAG AA compliant contrast ratios (≥ 4.5:1) between editor canvas and primary foreground text (`#e2e8f0`).
+  - Set `ThemeMode::PureObsidian` as the default theme in `Theme::default()`.
+- **Pure-Rust Vector Icon Engine (`rustforge-app::ui::icons`)**:
+  - Zero external font files, zero glyph atlas lookups, sub-pixel High-DPI geometric painter engine.
+  - Complete icon palette: `Files`, `Search`, `SourceControl`, `Terminal`, `Settings`, `FolderClosed`, `FolderOpen`, `FileRust`, `FileToml`, `FileMarkdown`, `FileGeneric`, `ChevronRight`, `ChevronDown`, `Close`, `UnsavedDot`, `SplitHorizontal`, `SplitVertical`, `GitBranch`, `GitAdded`, `GitModified`, `GitRemoved`, `DiagnosticError`, `DiagnosticWarning`, `DiagnosticInfo`.
+  - Replaced all system emoji (`📁`, `🔍`, `🌿`, `⌨`, `❌`, `⚠`) across sidebar tree, navigation buttons, and status bar.
+- **Component Polish & Micro-Layout Refinements (`rustforge-app::ui`)**:
+  - **Editor Tab Strip**: 2px cyan (`#38bdf8`) active tab top indicator line, seamless bottom border opening into editor canvas, subtle 1px dividers, and hover transition between unsaved dirty dot and `✕` close button.
+  - **Breadcrumbs Bar**: Compact 22px bar above editor canvas with `Icon::ChevronRight` separators and file-type badges.
+  - **Activity Bar**: 48px fixed-width column with 2px cyan active indicator pill and soft rounded hover background (`#1a1b23`).
+  - **Status Bar**: Low-profile `#0e0f12` matte dark chrome with discrete Git branch pills (`↑`/`↓` counters) and LSP diagnostic badges (`✕` error / `⚠` warning).
+  - **Command Palette Modal**: 8px rounded window with 1px border (`#2a2c38`), Tier 3 background (`#1c1d24`), `Icon::Search` prefix, and `#1e293b` selection highlights with dimmed backdrop scrim (`Color32::from_black_alpha(140)`).
+
 ## [0.3.0] - 2026-11-17
 
 ### Added (Milestone 3: Developer Tools)

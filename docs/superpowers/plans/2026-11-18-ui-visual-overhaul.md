@@ -30,7 +30,7 @@
   - `Theme::pure_obsidian() -> Self` constructor in `crates/rustforge-themes/src/theme.rs`
   - `Theme::default() -> Self` returning `Theme::pure_obsidian()`
 
-- [ ] **Step 1: Write the failing tests for Pure Obsidian theme**
+- [x] **Step 1: Write the failing tests for Pure Obsidian theme**
 
 Create `crates/rustforge-themes/tests/theme_tests.rs`:
 ```rust
@@ -69,12 +69,12 @@ fn test_pure_obsidian_serialization() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p rustforge-themes --test theme_tests`
 Expected: FAIL with "no variant named `PureObsidian` found"
 
-- [ ] **Step 3: Implement Pure Obsidian theme in `crates/rustforge-themes/src/theme.rs`**
+- [x] **Step 3: Implement Pure Obsidian theme in `crates/rustforge-themes/src/theme.rs`**
 
 Add `PureObsidian` to `ThemeMode`:
 ```rust
@@ -144,12 +144,12 @@ Update `Theme::from_mode` to handle `ThemeMode::PureObsidian`:
 ThemeMode::PureObsidian => Self::pure_obsidian(),
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p rustforge-themes`
 Expected: PASS with all tests passing.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/rustforge-themes/src/theme.rs crates/rustforge-themes/tests/theme_tests.rs
@@ -172,7 +172,7 @@ git commit -m "feat(themes): add Pure Obsidian theme and elevation tokens"
   - `Icon::paint(&self, painter: &Painter, rect: Rect, color: Color32)`
   - `Icon::ui(&self, ui: &mut Ui, size: Vec2, color: Color32) -> Response`
 
-- [ ] **Step 1: Write the failing tests for Vector Icon Engine**
+- [x] **Step 1: Write the failing tests for Vector Icon Engine**
 
 Create `crates/rustforge-app/tests/icon_tests.rs`:
 ```rust
@@ -229,12 +229,12 @@ fn test_all_icons_paint_without_panic() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p rustforge-app --test icon_tests`
 Expected: FAIL with "unresolved import `rustforge_app::ui::icons`"
 
-- [ ] **Step 3: Implement `Icon` rendering engine in `crates/rustforge-app/src/ui/icons.rs`**
+- [x] **Step 3: Implement `Icon` rendering engine in `crates/rustforge-app/src/ui/icons.rs`**
 
 Create `crates/rustforge-app/src/ui/icons.rs`:
 ```rust
@@ -461,12 +461,12 @@ impl Icon {
 
 Add `pub mod icons;` to `crates/rustforge-app/src/ui/mod.rs`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cargo test -p rustforge-app --test icon_tests`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/rustforge-app/src/ui/icons.rs crates/rustforge-app/src/ui/mod.rs crates/rustforge-app/tests/icon_tests.rs
@@ -484,7 +484,7 @@ git commit -m "feat(ui): implement pure-Rust vector icon engine"
 - Consumes: `rustforge_app::ui::icons::Icon`, `rustforge_themes::Theme`
 - Modifies: `render_tab_bar(app: &mut RustForgeApp, ui: &mut Ui)`
 
-- [ ] **Step 1: Write test for tab bar active accent and dirty dot rendering**
+- [x] **Step 1: Write test for tab bar active accent and dirty dot rendering**
 
 Add a test in `crates/rustforge-app/tests/ui_tab_tests.rs`:
 ```rust
@@ -506,12 +506,12 @@ fn test_tab_icon_sizing() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify compilation and pass**
+- [x] **Step 2: Run test to verify compilation and pass**
 
 Run: `cargo test -p rustforge-app --test ui_tab_tests`
 Expected: PASS
 
-- [ ] **Step 3: Update `render_tab_bar` and add breadcrumbs in `crates/rustforge-app/src/ui/editor_view.rs`**
+- [x] **Step 3: Update `render_tab_bar` and add breadcrumbs in `crates/rustforge-app/src/ui/editor_view.rs`**
 
 In `crates/rustforge-app/src/ui/editor_view.rs`:
 1. In `render_tab_bar`:
@@ -524,12 +524,12 @@ In `crates/rustforge-app/src/ui/editor_view.rs`:
    - Path split by `/`, each step separated by `Icon::ChevronRight` (10x10, color `#64748b`).
    - Active file prefixed by `Icon::FileRust` (if `.rs`), `Icon::FileToml` (if `.toml`), `Icon::FileMarkdown` (if `.md`), or `Icon::FileGeneric`.
 
-- [ ] **Step 4: Run workspace tests to verify no regressions**
+- [x] **Step 4: Run workspace tests to verify no regressions**
 
 Run: `cargo test --workspace`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/rustforge-app/src/ui/editor_view.rs crates/rustforge-app/tests/ui_tab_tests.rs
@@ -550,7 +550,7 @@ git commit -m "feat(ui): modernize editor tab strip and breadcrumbs with vector 
   - `render_activity_bar(app: &mut RustForgeApp, ui: &mut Ui)`
   - `render_status_bar(app: &RustForgeApp, ui: &mut Ui)`
 
-- [ ] **Step 1: Write test for activity bar and status bar icon rendering**
+- [x] **Step 1: Write test for activity bar and status bar icon rendering**
 
 Create `crates/rustforge-app/tests/activity_status_tests.rs`:
 ```rust
@@ -581,12 +581,12 @@ fn test_activity_bar_icons_exist() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it passes**
+- [x] **Step 2: Run test to verify it passes**
 
 Run: `cargo test -p rustforge-app --test activity_status_tests`
 Expected: PASS
 
-- [ ] **Step 3: Update `activity_bar.rs` with vector icons & 2px indicator pill**
+- [x] **Step 3: Update `activity_bar.rs` with vector icons & 2px indicator pill**
 
 In `crates/rustforge-app/src/ui/activity_bar.rs`:
 - Replace `"📁"`, `"🔍"`, `"🌿"`, `"⌨"`, `"⚙"` buttons with custom icon button helper:
@@ -633,7 +633,7 @@ fn render_nav_button(
 ```
 - Hook `Icon::Files`, `Icon::Search`, `Icon::SourceControl`, `Icon::Terminal`, and `Icon::Settings`.
 
-- [ ] **Step 4: Update `status_bar.rs` with matte dark chrome & pill badges**
+- [x] **Step 4: Update `status_bar.rs` with matte dark chrome & pill badges**
 
 In `crates/rustforge-app/src/ui/status_bar.rs`:
 - Left side:
@@ -645,12 +645,12 @@ In `crates/rustforge-app/src/ui/status_bar.rs`:
     - If both 0: Muted icon + `0`.
   - Editor coordinates: `Ln X, Col Y`, `Spaces: 4`, `UTF-8`, `Rust`.
 
-- [ ] **Step 5: Run workspace tests to verify they pass**
+- [x] **Step 5: Run workspace tests to verify they pass**
 
 Run: `cargo test --workspace`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/rustforge-app/src/ui/activity_bar.rs crates/rustforge-app/src/ui/status_bar.rs crates/rustforge-app/tests/activity_status_tests.rs
@@ -671,7 +671,7 @@ git commit -m "feat(ui): modernize activity bar and status bar with vector icons
   - `render_file_tree(...)` in `sidebar.rs`
   - `render_command_palette(...)` in `palette.rs`
 
-- [ ] **Step 1: Write unit tests for file type icon resolution**
+- [x] **Step 1: Write unit tests for file type icon resolution**
 
 Add test in `crates/rustforge-app/tests/file_tree_icon_tests.rs`:
 ```rust
@@ -698,12 +698,12 @@ fn test_file_type_icon_resolution() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it passes**
+- [x] **Step 2: Run test to verify it passes**
 
 Run: `cargo test -p rustforge-app --test file_tree_icon_tests`
 Expected: PASS
 
-- [ ] **Step 3: Update `sidebar.rs` to replace emoji with vector icons**
+- [x] **Step 3: Update `sidebar.rs` to replace emoji with vector icons**
 
 In `crates/rustforge-app/src/ui/sidebar.rs`:
 - In `render_explorer`:
@@ -713,7 +713,7 @@ In `crates/rustforge-app/src/ui/sidebar.rs`:
 - In `render_git`:
   - Replace `"🌿"` with `Icon::GitBranch`.
 
-- [ ] **Step 4: Update `palette.rs` modal styling**
+- [x] **Step 4: Update `palette.rs` modal styling**
 
 In `crates/rustforge-app/src/ui/palette.rs`:
 - Increase backdrop scrim dimming opacity to `Color32::from_black_alpha(140)`.
@@ -721,12 +721,12 @@ In `crates/rustforge-app/src/ui/palette.rs`:
 - Input field: Paint `Icon::Search` (14x14) preceding query input.
 - Highlight selected command with `#1e293b` fill and crisp foreground text.
 
-- [ ] **Step 5: Run tests and verify**
+- [x] **Step 5: Run tests and verify**
 
 Run: `cargo test --workspace`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/rustforge-app/src/ui/sidebar.rs crates/rustforge-app/src/ui/palette.rs crates/rustforge-app/tests/file_tree_icon_tests.rs
@@ -743,22 +743,22 @@ git commit -m "feat(ui): modernize sidebar file tree icons and command palette m
 **Interfaces:**
 - Workspace quality gates and binary smoke verification
 
-- [ ] **Step 1: Run clippy across all workspace crates with `-D warnings`**
+- [x] **Step 1: Run clippy across all workspace crates with `-D warnings`**
 
 Run: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 Expected: 0 warnings, clean exit code 0.
 
-- [ ] **Step 2: Run full workspace test suite**
+- [x] **Step 2: Run full workspace test suite**
 
 Run: `cargo test --workspace`
 Expected: 100% pass across all tests in all crates.
 
-- [ ] **Step 3: Verify binary build & launch**
+- [x] **Step 3: Verify binary build & launch**
 
 Run: `cargo build -p rustforge-app`
 Expected: Clean build with exit code 0.
 
-- [ ] **Step 4: Final commit and changelog entry**
+- [x] **Step 4: Final commit and changelog entry**
 
 ```bash
 git commit --allow-empty -m "chore(ui): complete UI visual overhaul verification and quality gates"
