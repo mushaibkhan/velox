@@ -1,36 +1,63 @@
 use crate::app::{RustForgeApp, SidebarTab};
-use egui::{Button, Layout, RichText, Ui, Vec2};
+use crate::ui::icons::Icon;
+use egui::{pos2, Color32, Layout, Rect, Sense, Ui, Vec2};
+
+fn render_nav_button(
+    ui: &mut Ui,
+    icon: Icon,
+    is_active: bool,
+    tooltip: &str,
+    theme: &rustforge_themes::Theme,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(48.0, 40.0), Sense::click());
+
+    // Hover background highlight
+    if response.hovered() {
+        ui.painter().rect_filled(
+            rect.shrink2(Vec2::new(4.0, 2.0)),
+            3.0,
+            Color32::from_rgb(26, 27, 35),
+        );
+    }
+
+    // Active left pill (2px width cyan)
+    if is_active {
+        let pill_rect = Rect::from_min_max(
+            pos2(rect.min.x, rect.min.y + 8.0),
+            pos2(rect.min.x + 2.0, rect.max.y - 8.0),
+        );
+        ui.painter().rect_filled(pill_rect, 1.0, theme.fg_accent);
+    }
+
+    let icon_color = if is_active {
+        theme.fg_primary
+    } else if response.hovered() {
+        theme.fg_secondary
+    } else {
+        theme.fg_muted
+    };
+
+    let icon_rect = Rect::from_center_size(rect.center(), Vec2::splat(18.0));
+    icon.paint(ui.painter(), icon_rect, icon_color);
+    response.on_hover_text(tooltip)
+}
 
 pub fn render_activity_bar(app: &mut RustForgeApp, ui: &mut Ui) {
     ui.vertical(|ui| {
         ui.add_space(8.0);
 
-        let make_tab_btn = |ui: &mut Ui, label: &str, tab: SidebarTab, current: SidebarTab, is_visible: bool| {
-            let is_selected = is_visible && current == tab;
-            let bg_color = if is_selected {
-                app.theme.fg_accent
-            } else {
-                app.theme.bg_activity_bar
-            };
-            let text_color = if is_selected {
-                egui::Color32::WHITE
-            } else {
-                app.theme.fg_secondary
-            };
-
-            let btn = Button::new(RichText::new(label).size(15.0).color(text_color))
-                .fill(bg_color)
-                .min_size(Vec2::new(42.0, 40.0));
-
-            ui.add(btn)
-        };
-
         // Explorer Button
-        if make_tab_btn(ui, "📁", SidebarTab::Explorer, app.active_sidebar, app.sidebar_visible)
-            .on_hover_text("Explorer (Ctrl+Shift+E)")
-            .clicked()
+        let explorer_active = app.sidebar_visible && app.active_sidebar == SidebarTab::Explorer;
+        if render_nav_button(
+            ui,
+            Icon::Files,
+            explorer_active,
+            "Explorer (Ctrl+Shift+E)",
+            &app.theme,
+        )
+        .clicked()
         {
-            if app.sidebar_visible && app.active_sidebar == SidebarTab::Explorer {
+            if explorer_active {
                 app.sidebar_visible = false;
             } else {
                 app.active_sidebar = SidebarTab::Explorer;
@@ -41,11 +68,17 @@ pub fn render_activity_bar(app: &mut RustForgeApp, ui: &mut Ui) {
         ui.add_space(4.0);
 
         // Search Button
-        if make_tab_btn(ui, "🔍", SidebarTab::Search, app.active_sidebar, app.sidebar_visible)
-            .on_hover_text("Search (Ctrl+Shift+F)")
-            .clicked()
+        let search_active = app.sidebar_visible && app.active_sidebar == SidebarTab::Search;
+        if render_nav_button(
+            ui,
+            Icon::Search,
+            search_active,
+            "Search (Ctrl+Shift+F)",
+            &app.theme,
+        )
+        .clicked()
         {
-            if app.sidebar_visible && app.active_sidebar == SidebarTab::Search {
+            if search_active {
                 app.sidebar_visible = false;
             } else {
                 app.active_sidebar = SidebarTab::Search;
@@ -56,11 +89,17 @@ pub fn render_activity_bar(app: &mut RustForgeApp, ui: &mut Ui) {
         ui.add_space(4.0);
 
         // Git Button
-        if make_tab_btn(ui, "🌿", SidebarTab::Git, app.active_sidebar, app.sidebar_visible)
-            .on_hover_text("Source Control (Ctrl+Shift+G)")
-            .clicked()
+        let git_active = app.sidebar_visible && app.active_sidebar == SidebarTab::Git;
+        if render_nav_button(
+            ui,
+            Icon::SourceControl,
+            git_active,
+            "Source Control (Ctrl+Shift+G)",
+            &app.theme,
+        )
+        .clicked()
         {
-            if app.sidebar_visible && app.active_sidebar == SidebarTab::Git {
+            if git_active {
                 app.sidebar_visible = false;
             } else {
                 app.active_sidebar = SidebarTab::Git;
@@ -71,10 +110,15 @@ pub fn render_activity_bar(app: &mut RustForgeApp, ui: &mut Ui) {
         ui.add_space(4.0);
 
         // Terminal Toggle Button
-        let term_btn = Button::new(RichText::new("⌨").size(15.0).color(app.theme.fg_secondary))
-            .fill(app.theme.bg_activity_bar)
-            .min_size(Vec2::new(42.0, 40.0));
-        if ui.add(term_btn).on_hover_text("Toggle Terminal (Ctrl+`)").clicked() {
+        if render_nav_button(
+            ui,
+            Icon::Terminal,
+            app.terminal_visible,
+            "Toggle Terminal (Ctrl+`)",
+            &app.theme,
+        )
+        .clicked()
+        {
             app.terminal_visible = !app.terminal_visible;
         }
 
@@ -82,11 +126,17 @@ pub fn render_activity_bar(app: &mut RustForgeApp, ui: &mut Ui) {
             ui.add_space(8.0);
 
             // Settings Button
-            if make_tab_btn(ui, "⚙", SidebarTab::Settings, app.active_sidebar, app.sidebar_visible)
-                .on_hover_text("Settings (Ctrl+,)")
-                .clicked()
+            let settings_active = app.sidebar_visible && app.active_sidebar == SidebarTab::Settings;
+            if render_nav_button(
+                ui,
+                Icon::Settings,
+                settings_active,
+                "Settings (Ctrl+,)",
+                &app.theme,
+            )
+            .clicked()
             {
-                if app.sidebar_visible && app.active_sidebar == SidebarTab::Settings {
+                if settings_active {
                     app.sidebar_visible = false;
                 } else {
                     app.active_sidebar = SidebarTab::Settings;
